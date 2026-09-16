@@ -61,3 +61,14 @@ export const STATUS_META: Record<string, { he: string; meaning: string; action: 
 }
 
 export const REGISTRARS = ['Namecheap', 'Dynadot']
+
+// The full set of TLDs the connected sources/registrars support (spec v1.2 §2 —
+// coverage is "all supported TLDs", not a hardcoded shortlist). A general scan covers all;
+// a command may narrow to a subset as an optional filter.
+export const SUPPORTED_TLDS = ['.com', '.net', '.org', '.io', '.co', '.ai', '.app', '.dev', '.me', '.tech', '.xyz', '.law']
+
+// Data sources consulted during a scan — surfaced in the coverage report.
+export const SCAN_SOURCES = ['RDAP', 'Namecheap Availability', 'Dynadot Expired/Closeout', 'Auction Feed']
+
+// Auto-classified sectors — for organizing results only, never for filtering (spec v1.2 §7).
+export const SECTORS = ['הגירה', 'משפטים', 'נדל״ן', 'טכנולוגיה', 'פיננסים', 'בריאות', 'חינוך', 'כללי']

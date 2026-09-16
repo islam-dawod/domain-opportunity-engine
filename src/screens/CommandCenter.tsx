@@ -22,18 +22,32 @@ function Field({ task, k, label, value }: { task: SearchTask; k: string; label: 
 }
 
 export default function CommandCenter() {
-  const { draftTask, interpretPrompt, clearDraft, runDraft, running, profile, opportunities } = useStore()
+  const { draftTask, interpretPrompt, clearDraft, runDraft, runGeneral, running, profile, opportunities } = useStore()
   const [prompt, setPrompt] = useState('')
   const nav = useNavigate()
 
   const onInterpret = () => { if (prompt.trim()) interpretPrompt(prompt) }
   const onRun = () => { runDraft(); setTimeout(() => nav('/results'), 950) }
+  const onGeneral = () => { runGeneral(); setTimeout(() => nav('/results'), 950) }
 
   return (
     <div className="space-y-5">
+      <div className="card flex flex-wrap items-center gap-4 border-brand/40 bg-gradient-to-l from-brand/15 to-transparent p-5">
+        <div className="min-w-0">
+          <h2 className="text-lg font-extrabold text-white">בדוק הזדמנויות בכל הדומיינים</h2>
+          <p className="mt-0.5 max-w-2xl text-sm text-muted">
+            הפעולה הראשית: סריקה כללית בכל התחומים ובכל הסיומות הנתמכות — ללא מילות מפתח, הגבלת אורך או שפה.
+            רצה מיד לפי הפרופיל, ללא שלב אישור פרשנות.
+          </p>
+        </div>
+        <button className="btn-primary mr-auto shrink-0" onClick={onGeneral} disabled={running}>
+          {running ? 'סורק…' : '▶ הפעל סריקה כללית'}
+        </button>
+      </div>
+
       <Section
         title="מרכז הפקודות"
-        sub="כתוב פקודה חופשית בעברית או באנגלית. המנוע יפרש אותה למסננים, ישלים חוסרים מהפרופיל, ויתחיל סריקה."
+        sub="תחום, שפה, סיומת ואורך הם מסננים אופציונליים בלבד. כתוב פקודה חופשית כדי לצמצם — המנוע ישלים חוסרים מהפרופיל."
       >
         <textarea
           value={prompt}
@@ -63,14 +77,19 @@ export default function CommandCenter() {
         <Section
           title="אישור פרשנות (S-02)"
           sub="אלה המסננים שהופקו מהפקודה. אפשר להריץ מיד — נתונים חסרים הושלמו מהפרופיל."
-          action={<button className="btn-primary" onClick={onRun} disabled={running}>{running ? 'סורק…' : 'הפעל משימה ▶'}</button>}
+          action={
+            <div className="flex items-center gap-2">
+              {draftTask.general && <span className="rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-xs font-semibold text-brand2">חיפוש כללי</span>}
+              <button className="btn-primary" onClick={onRun} disabled={running}>{running ? 'סורק…' : 'הפעל משימה ▶'}</button>
+            </div>
+          }
         >
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-            <Field task={draftTask} k="keywords" label="מילות מפתח" value={draftTask.keywords.slice(0, 4).join(', ')} />
-            <Field task={draftTask} k="keywords" label="תחומים" value={draftTask.semanticTopics.join(', ') || '—'} />
-            <Field task={draftTask} k="language" label="שפה" value={draftTask.language} />
-            <Field task={draftTask} k="tlds" label="סיומות" value={draftTask.tlds.join(', ')} />
-            <Field task={draftTask} k="maxLength" label="אורך מרבי" value={`${draftTask.maxLength} תווים`} />
+            <Field task={draftTask} k="keywords" label="מילות מפתח" value={draftTask.keywords.slice(0, 4).join(', ') || 'ללא — כל התחומים'} />
+            <Field task={draftTask} k="keywords" label="תחומים" value={draftTask.semanticTopics.join(', ') || 'כל התחומים'} />
+            <Field task={draftTask} k="language" label="שפה" value={draftTask.language === 'Any' ? 'ללא הגבלה' : draftTask.language} />
+            <Field task={draftTask} k="tlds" label="סיומות" value={draftTask.tlds.join(', ') || 'כל הסיומות הנתמכות'} />
+            <Field task={draftTask} k="maxLength" label="אורך מרבי" value={draftTask.lengthLimited ? `${draftTask.maxLength} תווים` : 'ללא הגבלה'} />
             <Field task={draftTask} k="maxPrice" label="תקציב לדומיין" value={money(draftTask.maxPrice, draftTask.currency)} />
             <Field task={draftTask} k="minimumScore" label="סף ציון" value={String(draftTask.minimumScore)} />
             <Field task={draftTask} k="statuses" label="סטטוסים" value={draftTask.statuses.join(', ')} />

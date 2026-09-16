@@ -1,14 +1,19 @@
+import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store'
-import { Section, Empty, ScoreRing, StatusPill, ClassBadge, Confidence, RiskDot } from '../components/ui'
+import { Section, Empty, ScoreRing, StatusPill, ClassBadge, Confidence, RiskDot, SectorTag, NewNameTag, PriceRangeTag } from '../components/ui'
+import PurchaseModal from '../components/PurchaseModal'
 import { STATUS_META, CHECK_FREQUENCY } from '../engine/config'
-import { evaluateAcquisition } from '../engine/acquisition'
+import { evaluateAcquisition, resolvePath } from '../engine/acquisition'
 import { money, timeAgo, timeUntil } from '../engine/util'
+
+const PATH_HE: Record<string, string> = { register: 'רישום ישיר', closeout: 'קנייה Closeout', auction: 'הצעה במכרז', backorder: 'Backorder', 'monitor-only': 'מעקב בלבד', unsupported: 'לא נתמך' }
 
 export default function DomainDetails() {
   const { id } = useParams()
   const nav = useNavigate()
-  const { opportunities, profile, spentToday, spentMonth, toggleWatch, buy } = useStore()
+  const { opportunities, profile, spentToday, spentMonth, toggleWatch } = useStore()
+  const [buying, setBuying] = useState(false)
   const o = opportunities.find((x) => x.id === id)
 
   if (!o) return <Section title="פרטי דומיין"><Empty>הדומיין לא נמצא. <Link to="/results" className="text-brand2">חזרה לתוצאות</Link></Empty></Section>
@@ -16,6 +21,8 @@ export default function DomainDetails() {
   const decision = evaluateAcquisition(o, profile, spentToday, spentMonth)
   const meta = STATUS_META[o.status]
   const freq = CHECK_FREQUENCY[o.status]
+  const path = resolvePath(o.status)
+  const canBuy = o.classification !== 'blocked' && path !== 'monitor-only' && path !== 'unsupported'
 
   return (
     <div className="space-y-5">
@@ -26,18 +33,21 @@ export default function DomainDetails() {
             <h1 className="text-2xl font-extrabold text-white" dir="ltr">{o.domain}</h1>
             <ClassBadge c={o.classification} />
             <StatusPill status={o.status} />
+            <SectorTag sector={o.sector} />
             {o.price.premium && <span className="chip !text-warn">Premium</span>}
           </div>
           {o.punycode && <div className="mt-1 text-xs text-warn" dir="ltr">Punycode: {o.punycode} — דגל סיכון IDN</div>}
           <p className="mt-1 max-w-2xl text-sm text-muted">{o.reason}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2"><NewNameTag isNew={o.isNewName} /><PriceRangeTag o={o} /><span className="chip">מסלול: {PATH_HE[path]}</span></div>
         </div>
         <div className="mr-auto flex items-center gap-2">
           <button className="btn-ghost" onClick={() => toggleWatch(o.id)}>{o.watched ? '✓ במעקב' : '＋ מעקב'}</button>
-          <button className="btn-primary" onClick={() => buy(o.id)} disabled={o.classification === 'blocked'}>
-            {o.status === 'Available' ? 'רכוש עכשיו' : o.status === 'Auction' ? 'הצע במכרז' : 'הזמן Backorder'}
+          <button className="btn-primary disabled:opacity-40" onClick={() => setBuying(true)} disabled={!canBuy}>
+            {o.status === 'Available' ? 'רכוש עכשיו' : o.status === 'Auction' ? 'הצע במכרז' : o.status === 'Closeout' ? 'קנה Closeout' : path === 'backorder' ? 'הזמן Backorder' : 'מעקב בלבד'}
           </button>
         </div>
       </div>
+      {buying && <PurchaseModal opp={o} onClose={() => setBuying(false)} />}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <Section title="פירוט ציון" sub="ציון משוקלל 0–100 (מחושב לאחר אימות סטטוס)">

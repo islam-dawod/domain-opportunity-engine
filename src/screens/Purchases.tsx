@@ -3,14 +3,15 @@ import { Section, Empty } from '../components/ui'
 import { money, timeAgo } from '../engine/util'
 
 const statusMeta: Record<string, { t: string; c: string }> = {
-  success: { t: 'הושלמה', c: 'text-good border-good/40 bg-good/10' },
+  success: { t: 'הושלמה ואומתה', c: 'text-good border-good/40 bg-good/10' },
   'awaiting-approval': { t: 'ממתין לאישור', c: 'text-warn border-warn/40 bg-warn/10' },
   prepared: { t: 'מוכנה', c: 'text-brand2 border-brand/40 bg-brand/10' },
+  unknown: { t: 'לא ידוע (Timeout)', c: 'text-warn border-warn/40 bg-warn/10' },
   failed: { t: 'נכשלה', c: 'text-bad border-bad/40 bg-bad/10' },
 }
 
 export default function Purchases() {
-  const { purchases, approve, profile } = useStore()
+  const { purchases, approve, reconcile, profile } = useStore()
   const yearly = purchases.filter((p) => p.status === 'success').reduce((s, p) => s + p.amount, 0)
 
   if (!purchases.length)
@@ -41,7 +42,10 @@ export default function Purchases() {
                   <td className="td text-xs text-muted" dir="ltr">{p.orderId ?? '—'}</td>
                   <td className="td text-[10px] text-muted" dir="ltr">…{p.idempotencyKey.slice(-8)}</td>
                   <td className="td text-xs text-muted">{timeAgo(p.at)}</td>
-                  <td className="td">{p.status === 'awaiting-approval' && <button className="btn-primary !px-3 !py-1 text-xs" onClick={() => approve(p.id)}>אשר</button>}</td>
+                  <td className="td">
+                    {p.status === 'awaiting-approval' && <button className="btn-primary !px-3 !py-1 text-xs" onClick={() => approve(p.id)}>אשר</button>}
+                    {p.status === 'unknown' && <button className="btn-ghost !px-3 !py-1 text-xs" onClick={() => reconcile(p.id)}>בדוק מצב</button>}
+                  </td>
                 </tr>
               ))}
             </tbody>

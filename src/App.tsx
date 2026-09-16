@@ -8,6 +8,7 @@ import DomainDetails from './screens/DomainDetails'
 import Compare from './screens/Compare'
 import Watchlist from './screens/Watchlist'
 import Purchases from './screens/Purchases'
+import MyDomains from './screens/MyDomains'
 import Alerts from './screens/Alerts'
 import Profiles from './screens/Profiles'
 import Integrations from './screens/Integrations'
@@ -20,6 +21,7 @@ const NAV = [
   { to: '/compare', label: 'השוואה', icon: '⇄', id: 'S-05' },
   { to: '/watchlist', label: 'מעקב', icon: '👁', id: 'S-06' },
   { to: '/purchases', label: 'רכישות', icon: '🛒', id: 'S-07' },
+  { to: '/my-domains', label: 'הדומיינים שלי', icon: '🌐', id: 'S-13' },
   { to: '/alerts', label: 'התראות', icon: '🔔', id: 'S-08' },
   { to: '/profiles', label: 'פרופילים וכללים', icon: '⚙', id: 'S-09' },
   { to: '/integrations', label: 'אינטגרציות', icon: '🔌', id: 'S-10' },
@@ -37,7 +39,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
           <img src={`${import.meta.env.BASE_URL}favicon.svg`} className="h-9 w-9" alt="logo" />
           <div>
             <div className="text-sm font-extrabold leading-tight text-white">Domain Opportunity</div>
-            <div className="text-[11px] tracking-wide text-brand2">ENGINE · v1.0</div>
+            <div className="text-[11px] tracking-wide text-brand2">ENGINE · v1.2</div>
           </div>
         </div>
         <nav className="space-y-1">
@@ -92,6 +94,7 @@ export default function App() {
             <Route path="/compare" element={<Compare />} />
             <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/purchases" element={<Purchases />} />
+            <Route path="/my-domains" element={<MyDomains />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/profiles" element={<Profiles />} />
             <Route path="/integrations" element={<Integrations />} />

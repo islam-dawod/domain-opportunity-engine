@@ -20,10 +20,14 @@ export interface SearchTask {
   id: string
   queryName: string
   rawPrompt: string
+  // general = true means a broad all-domains scan (no topic/keyword/length/language
+  // constraints). Topic, language, length and TLD are optional filters only (spec v1.2 §2).
+  general: boolean
   keywords: string[]
   semanticTopics: string[]
   language: 'English' | 'Hebrew' | 'Any'
-  tlds: string[]
+  tlds: string[] // empty = all supported TLDs
+  lengthLimited: boolean
   maxLength: number
   maxPrice: number
   currency: 'USD' | 'EUR' | 'ILS'
@@ -35,6 +39,14 @@ export interface SearchTask {
   createdAt: string
   // which fields were filled from the free text vs. the default profile
   inferred: Record<string, 'command' | 'profile' | 'default'>
+}
+
+// Comparable-sales evidence for an estimated market price (spec v1.2 §7).
+export interface PriceRange {
+  low: number
+  high: number
+  source: string
+  date: string
 }
 
 export interface RiskFinding {
@@ -81,6 +93,12 @@ export interface Opportunity {
   referringDomains: number
   estTraffic: number
   price: PriceQuote
+  // auto-classified sector — for organizing results only, never for filtering (spec v1.2 §7)
+  sector: string
+  // a never-before-registered "new" name vs. a previously-owned/expired one (spec v1.2 AC-15)
+  isNewName: boolean
+  // estimated market range from comparable sales, or null when no evidence exists
+  priceRange: PriceRange | null
   // scoring
   score: number // 0..100
   confidence: number // 0..100
@@ -95,6 +113,16 @@ export interface Opportunity {
   hidden: boolean
 }
 
+// Coverage transparency for a scan (spec v1.2 §2 "הכיסוי").
+export interface CoverageReport {
+  sourcesChecked: string[]
+  tldsCovered: string[]
+  candidates: number
+  updatedAt: string
+  failures: string[]
+  partial: boolean
+}
+
 export interface WatchItem {
   domain: string
   targetStatus: DomainStatus | 'Available'
@@ -103,16 +131,52 @@ export interface WatchItem {
   rule: string
 }
 
+// A verified quote produced at buy-time (spec v1.2 §8.1.1 — re-check before order).
+export interface PurchaseQuote {
+  domain: string
+  provider: string
+  path: 'register' | 'closeout' | 'auction' | 'backorder' | 'monitor-only' | 'unsupported'
+  available: boolean
+  base: number
+  taxes: number
+  fees: number
+  total: number
+  currency: string
+  registrationYears: number
+  renewalPrice: number
+  autoRenew: boolean
+  ownerContact: string
+  balanceOk: boolean
+  verifiable: boolean
+  note: string
+}
+
 export interface PurchaseAttempt {
   id: string
   domain: string
   provider: string
   amount: number
   currency: string
-  status: 'prepared' | 'awaiting-approval' | 'success' | 'failed'
+  // 'unknown' = registrar timed out; state must be reconciled before any retry (§8.1.3)
+  status: 'prepared' | 'awaiting-approval' | 'success' | 'failed' | 'unknown'
   idempotencyKey: string
   at: string
   orderId?: string
+  path?: PurchaseQuote['path']
+}
+
+// A domain owned after a verified purchase (spec v1.2 §8.1.1 "הדומיינים שלי").
+export interface OwnedDomain {
+  domain: string
+  registrar: string
+  owner: string
+  purchasedAt: string
+  expiresAt: string
+  autoRenew: boolean
+  renewalPrice: number
+  currency: string
+  receiptUrl: string
+  emailVerified: boolean
 }
 
 export type AlertChannel = 'email' | 'whatsapp' | 'inapp'

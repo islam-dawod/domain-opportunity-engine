@@ -1,5 +1,6 @@
-import type { DomainStatus, Opportunity } from '../engine/types'
+import type { DomainStatus, Opportunity, CoverageReport } from '../engine/types'
 import { STATUS_META } from '../engine/config'
+import { money, timeAgo } from '../engine/util'
 
 const toneClass: Record<string, string> = {
   good: 'text-good border-good/40 bg-good/10',
@@ -75,4 +76,51 @@ export function Section({ title, sub, children, action }: { title: string; sub?:
 
 export function Empty({ children }: { children: React.ReactNode }) {
   return <div className="grid place-items-center rounded-xl border border-dashed border-line py-10 text-center text-sm text-muted">{children}</div>
+}
+
+// Coverage transparency panel (spec v1.2 §2).
+export function CoveragePanel({ c }: { c: CoverageReport }) {
+  return (
+    <div className={`card p-4 ${c.partial ? 'border-warn/40' : ''}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-bold text-white">כיסוי הבדיקה</span>
+        {c.partial ? <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-xs font-semibold text-warn">תוצאה חלקית</span>
+          : <span className="rounded-full border border-good/40 bg-good/10 px-2 py-0.5 text-xs font-semibold text-good">מלא</span>}
+        <span className="mr-auto text-xs text-muted">עודכן {timeAgo(c.updatedAt)}</span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div>
+          <div className="text-xs text-muted">מקורות שנבדקו</div>
+          <div className="mt-1 flex flex-wrap gap-1">{c.sourcesChecked.map((s) => <span key={s} className="chip">{s}</span>)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted">סיומות מכוסות · {c.tldsCovered.length}</div>
+          <div className="mt-1 flex flex-wrap gap-1" dir="ltr">{c.tldsCovered.map((t) => <span key={t} className="chip">{t}</span>)}</div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+        <span className="stat">מועמדים שנסרקו: <b className="text-white">{c.candidates.toLocaleString()}</b></span>
+        {c.failures.length > 0 && c.failures.map((f) => <span key={f} className="rounded-lg border border-warn/40 bg-warn/10 px-2 py-1 text-warn">⚠ {f}</span>)}
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-muted">
+        הכיסוי כולל את הרשומות הזמינות במקורות המחוברים ובסיומות שהם מספקים. לא נסרקו כל צירופי השמות האפשריים בעולם, ואפס תוצאות אינו הוכחה שאין הזדמנויות בשוק.
+      </p>
+    </div>
+  )
+}
+
+export function SectorTag({ sector }: { sector: string }) {
+  return <span className="rounded-full border border-line bg-panel2/60 px-2 py-0.5 text-[11px] text-muted">{sector}</span>
+}
+
+export function PriceRangeTag({ o }: { o: Opportunity }) {
+  if (o.priceRange)
+    return <span className="chip !text-good" title={`מקור: ${o.priceRange.source} · ${o.priceRange.date}`}>שווי שוק משוער {money(o.priceRange.low, o.price.currency)}–{money(o.priceRange.high, o.price.currency)}</span>
+  return <span className="chip" title="אין עסקאות השוואה זמינות">אין נתוני שווי — שם בתקציב</span>
+}
+
+export function NewNameTag({ isNew }: { isNew: boolean }) {
+  return isNew
+    ? <span className="rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-[11px] text-brand2">שם חדש (לא נרשם בעבר)</span>
+    : <span className="rounded-full border border-line bg-panel2/60 px-2 py-0.5 text-[11px] text-muted">שם עם היסטוריה</span>
 }

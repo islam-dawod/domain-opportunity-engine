@@ -70,7 +70,11 @@ export function interpret(prompt: string, profile: SearchProfile): SearchTask {
   const inferred: SearchTask['inferred'] = {}
   const set = (k: string, src: 'command' | 'profile' | 'default') => (inferred[k] = src)
 
-  // topics + keywords
+  // explicit "all domains / all TLDs" phrasing forces a general scan
+  const explicitGeneral = /בכל התחומים|כל התחומים|בכל הסיומות|כל הסיומות|all domains|every domain|all tlds|כל הדומיינים/i.test(prompt)
+
+  // topics + keywords — OPTIONAL filters. When absent, the scan is general (spec v1.2 §2):
+  // no default topic/keywords are pulled from the profile.
   const topics: string[] = []
   const keywords = new Set<string>()
   for (const t of TOPIC_MAP) {
@@ -79,28 +83,28 @@ export function interpret(prompt: string, profile: SearchProfile): SearchTask {
       t.keywords.forEach((k) => keywords.add(k))
     }
   }
-  if (topics.length) set('keywords', 'command')
-  else {
-    profile.keywords.forEach((k) => keywords.add(k))
-    profile.topics.forEach((t) => topics.push(t))
-    set('keywords', 'profile')
-  }
+  const hasTopic = topics.length > 0
+  set('keywords', hasTopic ? 'command' : 'default')
 
-  // language
+  // language — optional; default is unrestricted
   let language: SearchTask['language'] = 'Any'
   if (/אנגלית|english/i.test(prompt)) { language = 'English'; set('language', 'command') }
   else if (/עברית|hebrew/i.test(prompt)) { language = 'Hebrew'; set('language', 'command') }
   else set('language', 'default')
 
-  // tlds
+  // tlds — optional; empty = all supported TLDs
   let tlds = parseTlds(prompt)
-  if (tlds.length) set('tlds', 'command')
-  else { tlds = profile.tlds; set('tlds', 'profile') }
+  const hasTld = tlds.length > 0
+  if (hasTld) set('tlds', 'command')
+  else { tlds = []; set('tlds', 'default') }
 
-  // max length
-  const lenMatch = prompt.match(/(?:עד|up to|max(?:imum)?|)\s*(\d{1,2})\s*(?:תווים|characters?|chars?|letters?|אותיות)/i)
-  let maxLength = 15
-  if (lenMatch) { maxLength = num(lenMatch[1]); set('maxLength', 'command') } else set('maxLength', 'default')
+  // max length — optional; default is no limit
+  const lenMatch = prompt.match(/(?:עד|up to|max(?:imum)?)\s*(\d{1,2})\s*(?:תווים|characters?|chars?|letters?|אותיות)/i)
+  let maxLength = 63
+  let lengthLimited = false
+  if (lenMatch) { maxLength = num(lenMatch[1]); lengthLimited = true; set('maxLength', 'command') } else set('maxLength', 'default')
+
+  const general = explicitGeneral || (!hasTopic && !hasTld && !lengthLimited && language === 'Any')
 
   // price + currency
   const price = parsePrice(prompt)
@@ -131,16 +135,20 @@ export function interpret(prompt: string, profile: SearchProfile): SearchTask {
   const purchaseMode = mode ?? profile.purchaseMode
   set('purchaseMode', mode ? 'command' : 'profile')
 
-  const queryName = topics.length ? `${topics.join(' · ')} — ${new Date().toLocaleDateString('he-IL')}` : 'משימת חיפוש'
+  const queryName = general
+    ? `הזדמנויות בכל התחומים — ${new Date().toLocaleDateString('he-IL')}`
+    : `${topics.join(' · ') || 'חיפוש ממוקד'} — ${new Date().toLocaleDateString('he-IL')}`
 
   return {
     id: uid('task'),
     queryName,
-    rawPrompt: prompt.trim(),
+    rawPrompt: prompt.trim() || 'בדוק הזדמנויות בכל הדומיינים (חיפוש כללי לפי הפרופיל)',
+    general,
     keywords: [...keywords],
     semanticTopics: topics,
     language,
     tlds,
+    lengthLimited,
     maxLength,
     maxPrice,
     currency,
@@ -152,4 +160,9 @@ export function interpret(prompt: string, profile: SearchProfile): SearchTask {
     createdAt: new Date().toISOString(),
     inferred,
   }
+}
+
+// Build a general all-domains task directly (the home "check all" primary action).
+export function generalTask(profile: SearchProfile): SearchTask {
+  return interpret('', profile)
 }
