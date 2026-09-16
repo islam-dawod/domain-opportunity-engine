@@ -6,9 +6,9 @@ import CommandCenter from './screens/CommandCenter'
 import Results from './screens/Results'
 import DomainDetails from './screens/DomainDetails'
 import Compare from './screens/Compare'
-import Watchlist from './screens/Watchlist'
 import Purchases from './screens/Purchases'
 import MyDomains from './screens/MyDomains'
+import CheckLog from './screens/CheckLog'
 import Alerts from './screens/Alerts'
 import Profiles from './screens/Profiles'
 import Integrations from './screens/Integrations'
@@ -16,17 +16,17 @@ import Users from './screens/Users'
 import AuditLog from './screens/AuditLog'
 
 const NAV = [
-  { to: '/', label: 'מרכז הפקודות', icon: '⌘', id: 'S-01' },
-  { to: '/results', label: 'תוצאות', icon: '◇', id: 'S-03' },
-  { to: '/compare', label: 'השוואה', icon: '⇄', id: 'S-05' },
-  { to: '/watchlist', label: 'מעקב', icon: '👁', id: 'S-06' },
-  { to: '/purchases', label: 'רכישות', icon: '🛒', id: 'S-07' },
-  { to: '/my-domains', label: 'הדומיינים שלי', icon: '🌐', id: 'S-13' },
+  { to: '/', label: 'מרכז חיפוש', icon: '🔎', id: '' },
+  { to: '/results', label: 'לקנייה עכשיו', icon: '◇', id: '' },
+  { to: '/purchases', label: 'הזמנות', icon: '🛒', id: '' },
+  { to: '/my-domains', label: 'הדומיינים שלי', icon: '🌐', id: '' },
+  { to: '/compare', label: 'השוואה', icon: '⇄', id: '' },
   { to: '/alerts', label: 'התראות', icon: '🔔', id: 'S-08' },
-  { to: '/profiles', label: 'פרופילים וכללים', icon: '⚙', id: 'S-09' },
-  { to: '/integrations', label: 'אינטגרציות', icon: '🔌', id: 'S-10' },
-  { to: '/users', label: 'משתמשים', icon: '👤', id: 'S-11' },
-  { to: '/audit', label: 'Audit Log', icon: '📜', id: 'S-12' },
+  { to: '/profiles', label: 'הגדרות', icon: '⚙', id: '' },
+  { to: '/check-log', label: 'יומן בדיקות', icon: '📋', id: '' },
+  { to: '/integrations', label: 'אינטגרציות', icon: '🔌', id: '' },
+  { to: '/users', label: 'משתמשים', icon: '👤', id: '' },
+  { to: '/audit', label: 'Audit Log', icon: '📜', id: '' },
 ]
 
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -39,7 +39,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
           <img src={`${import.meta.env.BASE_URL}favicon.svg`} className="h-9 w-9" alt="logo" />
           <div>
             <div className="text-sm font-extrabold leading-tight text-white">Domain Opportunity</div>
-            <div className="text-[11px] tracking-wide text-brand2">ENGINE · v1.2</div>
+            <div className="text-[11px] tracking-wide text-brand2">ENGINE · v2.0 · לקנייה עכשיו</div>
           </div>
         </div>
         <nav className="space-y-1">
@@ -63,17 +63,16 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
 function TopBar({ onMenu }: { onMenu: () => void }) {
   const { profile, spentToday, spentMonth, currentTask } = useStore()
   const loc = useLocation()
-  const title = NAV.find((n) => n.to === loc.pathname)?.label ?? 'פרטי דומיין'
+  const title = NAV.find((n) => n.to === loc.pathname)?.label ?? 'כרטיס דומיין'
   return (
     <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-ink/80 px-4 py-3 backdrop-blur">
       <button className="btn-ghost !px-2 lg:hidden" onClick={onMenu} aria-label="תפריט">☰</button>
       <h1 className="text-base font-bold text-white">{title}</h1>
       <div className="mr-auto flex flex-wrap items-center gap-2">
         <span className="chip">פרופיל: <b className="text-white">{profile.name.split('—')[0].trim()}</b></span>
-        <span className="chip">מצב רכישה: <b className="text-white">{profile.purchaseMode}</b></span>
+        <span className="chip">רכישה: <b className="text-white">{profile.purchaseMode === 'manual' ? 'אישור ידני' : 'אוטומטי'}</b></span>
         <span className="chip">יומי: <b className="text-white">{money(spentToday, profile.currency)}/{money(profile.dailyBudget, profile.currency)}</b></span>
         <span className="chip hidden sm:inline-flex">חודשי: <b className="text-white">{money(spentMonth, profile.currency)}/{money(profile.monthlyBudget, profile.currency)}</b></span>
-        {currentTask && <span className="chip hidden md:inline-flex">משימה: <b className="text-white">{currentTask.queryName}</b></span>}
       </div>
     </header>
   )
@@ -92,9 +91,9 @@ export default function App() {
             <Route path="/results" element={<Results />} />
             <Route path="/domain/:id" element={<DomainDetails />} />
             <Route path="/compare" element={<Compare />} />
-            <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/purchases" element={<Purchases />} />
             <Route path="/my-domains" element={<MyDomains />} />
+            <Route path="/check-log" element={<CheckLog />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/profiles" element={<Profiles />} />
             <Route path="/integrations" element={<Integrations />} />

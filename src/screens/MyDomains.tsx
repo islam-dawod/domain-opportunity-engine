@@ -1,5 +1,6 @@
 import { useStore } from '../store/store'
 import { Section, Empty } from '../components/ui'
+import { PURCHASE_TYPE_META } from '../engine/config'
 import { money } from '../engine/util'
 
 export default function MyDomains() {
@@ -19,7 +20,7 @@ export default function MyDomains() {
           <div key={d.domain} className="card p-4">
             <div className="flex items-center justify-between">
               <span className="text-lg font-extrabold text-white" dir="ltr">{d.domain}</span>
-              <span className="chip">{d.registrar}</span>
+              <div className="flex items-center gap-1"><span className="chip">{PURCHASE_TYPE_META[d.purchaseType].he}</span><span className="chip">{d.registrar}</span></div>
             </div>
             <dl className="mt-3 space-y-1.5 text-sm">
               {[

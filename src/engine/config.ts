@@ -1,74 +1,78 @@
-import type { SearchProfile, ScoreComponent } from './types'
+import type { SearchProfile, ScoreComponent, PurchaseType } from './types'
 
-// Default one-time definition (spec 2.1 "הגדרה חד-פעמית").
+// One-time setup profile (spec v2.0 §2). Business sector is NOT required.
 export const DEFAULT_PROFILE: SearchProfile = {
   name: 'Elitiq — פרופיל חברה',
-  topics: ['הגירה', 'משפטים', 'נדל״ן', 'טכנולוגיה'],
-  keywords: ['visa', 'migrate', 'global', 'legal', 'relocation'],
-  tlds: ['.com', '.co', '.io'],
-  maxPrice: 500,
+  topics: [],
+  keywords: [],
+  savedTlds: [], // no silent TLD default on first visit (spec v2.0 §3)
+  maxPrice: 200,
+  maxRenewalPrice: 60,
   dailyBudget: 1500,
   monthlyBudget: 5000,
   currency: 'USD',
-  minimumScore: 80,
+  minimumScore: 70,
   exclusions: ['מונחים פוגעניים', 'מותגים מתחרים'],
-  purchaseMode: 'approve',
+  purchaseMode: 'manual', // manual approval by default (spec v2.0 §10)
+  allowFixedPrice: false, // fixed-price sale path OFF by default (spec v2.0 §1, §4)
   weights: {
-    relevance: 0.2,
-    brandability: 0.15,
-    length: 0.1,
-    tldQuality: 0.1,
-    price: 0.1,
-    age: 0.1,
-    links: 0.1,
-    cleanliness: 0.1,
-    legal: 0.05,
+    brandability: 0.22,
+    length: 0.16,
+    tldQuality: 0.16,
+    price: 0.16,
+    renewal: 0.12,
+    age: 0.06,
+    links: 0.06,
+    cleanliness: 0.04,
+    legal: 0.02,
   },
 }
 
-// Scoring components metadata (spec 7).
+// Scoring components (spec v2.0 §6) — memorability, readability, use-fit, TLD, total price,
+// renewal cost. No sector-relevance weight in a general search.
 export const SCORE_COMPONENTS: Omit<ScoreComponent, 'raw'>[] = [
-  { key: 'relevance', label: 'התאמה לתחום ולפקודה', weight: 0.2, checks: 'מילות מפתח, משמעות והקשר עסקי' },
-  { key: 'brandability', label: 'Brandability', weight: 0.15, checks: 'זכירות, הגייה, איות וייחוד' },
-  { key: 'length', label: 'אורך וקריאות', weight: 0.1, checks: 'מספר תווים, מקפים, מספרים ותווים מבלבלים' },
-  { key: 'tldQuality', label: 'איכות הסיומת', weight: 0.1, checks: 'התאמה לשוק ולשימוש' },
-  { key: 'price', label: 'מחיר מול תקציב', weight: 0.1, checks: 'מחיר רכישה, עמלה וחידוש' },
-  { key: 'age', label: 'וותק והיסטוריה', weight: 0.1, checks: 'גיל, עקביות ושימוש קודם' },
-  { key: 'links', label: 'קישורים ותנועה', weight: 0.1, checks: 'איכות קישורים ותנועה משוערת' },
-  { key: 'cleanliness', label: 'ניקיון טכני ושיווקי', weight: 0.1, checks: 'ספאם, אינדוקס, תוכן עבר' },
-  { key: 'legal', label: 'סיכון משפטי', weight: 0.05, checks: 'דמיון לסימני מסחר ומותגים' },
+  { key: 'brandability', label: 'זכירות והתאמה לשימוש', weight: 0.22, checks: 'זכירות, הגייה, ייחוד והתאמה לשימוש' },
+  { key: 'length', label: 'אורך וקריאות', weight: 0.16, checks: 'מספר תווים, מקפים, מספרים ותווים מבלבלים' },
+  { key: 'tldQuality', label: 'איכות הסיומת', weight: 0.16, checks: 'התאמה לשוק ולשימוש' },
+  { key: 'price', label: 'מחיר כולל מול תקציב', weight: 0.16, checks: 'מחיר רכישה, עמלות ומסים' },
+  { key: 'renewal', label: 'עלות חידוש', weight: 0.12, checks: 'מחיר חידוש שנתי' },
+  { key: 'age', label: 'וותק והיסטוריה', weight: 0.06, checks: 'גיל ושימוש קודם (כשקיים)' },
+  { key: 'links', label: 'קישורים ותנועה', weight: 0.06, checks: 'איכות קישורים ותנועה (כשקיים)' },
+  { key: 'cleanliness', label: 'ניקיון טכני ושיווקי', weight: 0.04, checks: 'ספאם, אינדוקס, תוכן עבר' },
+  { key: 'legal', label: 'סיכון משפטי', weight: 0.02, checks: 'דמיון לסימני מסחר ומותגים' },
 ]
 
-// Status → recommended re-check frequency (spec 3.1).
-export const CHECK_FREQUENCY: Record<string, { label: string; note: string }> = {
-  Registered: { label: 'פעם ביום', note: 'מעקב ארוך טווח' },
-  Expired: { label: 'כל 6 שעות', note: 'ייתכן חידוש על ידי הבעלים' },
-  Redemption: { label: 'כל 2–4 שעות', note: 'המתנה לשינוי סטטוס' },
-  PendingDelete: { label: 'כל 5–15 דקות + Backorder', note: 'חלון קריטי' },
-  Available: { label: 'אימות כפול מיידי', note: 'רישום לפי הרשאה' },
-  Auction: { label: 'לפי זמן הסיום; מוגבר בשעה האחרונה', note: 'כפוף לכללי ספק המכרז' },
-  Closeout: { label: 'כל שעה', note: 'מוצע על ידי רשם או שוק' },
+// Purchase-type presentation (spec v2.0 §1).
+export const PURCHASE_TYPE_META: Record<PurchaseType, { he: string; desc: string; tone: 'good' | 'warn' | 'muted'; buy: string }> = {
+  'register-new': { he: 'פנוי לרישום', desc: 'זמינות מאומתת + הצעת מחיר עדכנית', tone: 'good', buy: 'רשום עכשיו' },
+  'register-dropped': { he: 'נמחק — פנוי כעת', desc: 'זמין לרישום; היסטוריית תפוגה אינה מספיקה', tone: 'good', buy: 'רשום עכשיו' },
+  premium: { he: 'Premium פנוי', desc: 'זמינות מאומתת ומחיר Premium ידוע', tone: 'warn', buy: 'רשום Premium' },
+  'fixed-price': { he: 'מכירה במחיר קבוע', desc: 'הצעת Buy Now מאומתת; מסירה אינה מיידית', tone: 'warn', buy: 'קנה עכשיו' },
 }
 
-export const STATUS_META: Record<string, { he: string; meaning: string; action: string; tone: 'good' | 'warn' | 'bad' | 'muted' }> = {
-  Registered: { he: 'רשום ופעיל', meaning: 'רשום ופעיל', action: 'מעקב לפי תאריך תפוגה', tone: 'muted' },
-  Expired: { he: 'פג תוקף / Grace', meaning: 'פג תוקף אך בעליו עשוי לחדש', action: 'מעקב; אין הצגה כפנוי', tone: 'warn' },
-  Redemption: { he: 'Redemption', meaning: 'הבעלים עשוי לשחזר בתשלום', action: 'מעקב והכנה ל-Backorder', tone: 'warn' },
-  PendingDelete: { he: 'Pending Delete', meaning: 'בתהליך מחיקה', action: 'Backorder ובדיקות תכופות', tone: 'bad' },
-  Auction: { he: 'מכרז', meaning: 'מוצע על ידי רשם או שוק', action: 'הצעה או קנייה לפי התקציב', tone: 'warn' },
-  Closeout: { he: 'Closeout', meaning: 'מוצע במחיר סגירה', action: 'קנייה מהירה לפי התקציב', tone: 'warn' },
-  Available: { he: 'פנוי', meaning: 'פנוי לפי API של רשם', action: 'אימות כפול ורישום', tone: 'good' },
-}
+// Supported TLDs with an active check+purchase connection (spec v2.0 §3).
+// Country-code TLDs may carry eligibility requirements.
+export interface TldInfo { tld: string; country?: boolean; eligibility?: string; supported: boolean }
+export const SUPPORTED_TLDS: TldInfo[] = [
+  { tld: '.com', supported: true }, { tld: '.net', supported: true }, { tld: '.org', supported: true },
+  { tld: '.io', supported: true }, { tld: '.co', supported: true }, { tld: '.ai', supported: true },
+  { tld: '.app', supported: true }, { tld: '.dev', supported: true }, { tld: '.me', supported: true },
+  { tld: '.tech', supported: true }, { tld: '.xyz', supported: true },
+  { tld: '.co.il', country: true, eligibility: 'דרוש עוסק/ח.פ. ישראלי או זיקה', supported: true },
+  { tld: '.co.uk', country: true, eligibility: 'כתובת בריטית לרישום', supported: true },
+  { tld: '.law', eligibility: 'אימות רישיון עריכת דין', supported: false }, // not purchasable → not selectable
+]
 
+export const TLD_LIST = SUPPORTED_TLDS.map((t) => t.tld)
+export const PURCHASABLE_TLDS = SUPPORTED_TLDS.filter((t) => t.supported).map((t) => t.tld)
+
+export const SCAN_SOURCES = ['RDAP', 'Namecheap Availability', 'Dynadot API', 'Dropped-Names Feed']
+export const SECTORS = ['הגירה', 'משפטים', 'נדל״ן', 'טכנולוגיה', 'פיננסים', 'בריאות', 'חינוך', 'כללי']
 export const REGISTRARS = ['Namecheap', 'Dynadot']
 
-// The full set of TLDs the connected sources/registrars support (spec v1.2 §2 —
-// coverage is "all supported TLDs", not a hardcoded shortlist). A general scan covers all;
-// a command may narrow to a subset as an optional filter.
-export const SUPPORTED_TLDS = ['.com', '.net', '.org', '.io', '.co', '.ai', '.app', '.dev', '.me', '.tech', '.xyz', '.law']
+// Test registry: names the provider reports as already registered are blocked from
+// registration regardless of any other claim (spec v2.0 AC-6).
+export const REGISTERED_TEST_NAMES = ['visa', 'google', 'amazon', 'apple', 'microsoft', 'paypal']
 
-// Data sources consulted during a scan — surfaced in the coverage report.
-export const SCAN_SOURCES = ['RDAP', 'Namecheap Availability', 'Dynadot Expired/Closeout', 'Auction Feed']
-
-// Auto-classified sectors — for organizing results only, never for filtering (spec v1.2 §7).
-export const SECTORS = ['הגירה', 'משפטים', 'נדל״ן', 'טכנולוגיה', 'פיננסים', 'בריאות', 'חינוך', 'כללי']
+// Status/price validity window (spec v2.0 §5). Proposed product target, not a provider guarantee.
+export const VALIDITY_MINUTES = 5

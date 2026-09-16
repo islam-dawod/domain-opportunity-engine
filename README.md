@@ -1,60 +1,55 @@
 # Domain Opportunity Engine
 
-מערכת אוטומטית לאיתור, דירוג ורכישת דומיינים מפקודה חופשית בעברית ובאנגלית —
-מימוש **MVP פונקציונלי** של האפיון המלא (PRD v1.2).
+מערכת אוטומטית ל**דומיינים לקנייה עכשיו**: המשתמש בוחר סיומות ותקציב, כותב פקודה חופשית,
+ומקבל רק דומיינים שאומתה עבורם אפשרות קנייה מיידית — מימוש **MVP פונקציונלי** של האפיון (PRD **v2.0**).
 
-> **Automated domain opportunity discovery, scoring & safe acquisition** driven by a free-text
-> command in Hebrew/English. This is a functional front-end MVP that implements the product's
-> core intelligence over a deterministic simulated data engine (RDAP / registrars / auctions are
-> mocked — **no real purchases are made**).
+> **"Domains to buy now"** — the user picks TLDs + budget, types a free-text command, and gets only
+> domains verified purchasable right now. No expiry monitoring, Pending Delete, auctions or Backorder.
+> Functional front-end MVP over a deterministic simulated engine (RDAP/registrars/payments are mocked,
+> Sandbox — **no real purchases**).
 
 🔗 **דמו חי / Live demo:** https://islam-dawod.github.io/domain-opportunity-engine/
 
 ---
 
-## מה מיושם (Implemented)
+## עקרון v2.0 — לקנייה עכשיו בלבד
+
+הגרסה מחליפה את דרישות החיפוש, המעקב והרכישה בגרסה הקודמת. מוצגים רק:
+**פנוי לרישום חדש · נמחק וכעת פנוי · Premium פנוי · מכירה במחיר קבוע (אופציונלי, כבוי כברירת מחדל)**.
+תפוגה, שחזור, Pending Delete ומכרז אינם בתכולה.
 
 | # | יכולת | קובץ |
 |---|-------|------|
-| 6 | **מנוע הבנת הוראה** — פרשנות פקודה חופשית בעברית/אנגלית למסננים מובנים, עם השלמה מפרופיל וזיהוי מקור כל שדה | [`src/engine/interpreter.ts`](src/engine/interpreter.ts) |
-| 3–4 | **צנרת גילוי** — יצירת מועמדים, ניקוי, אימות סטטוס (מחזור חיי דומיין), והעשרה | [`src/engine/engine.ts`](src/engine/engine.ts) |
-| 7 | **מנוע דירוג** — ציון משוקלל 0–100 על 9 רכיבים, מדד Confidence, סיווג וספים | [`src/engine/engine.ts`](src/engine/engine.ts) · [`config.ts`](src/engine/config.ts) |
-| 8 | **רכישה בטוחה** — מצבי Monitor/Notify/Approval/Auto-buy + כל בקרות ה-Auto-buy ו-Idempotency | [`src/engine/acquisition.ts`](src/engine/acquisition.ts) |
-| 9 | **13 מסכי מוצר** — Command Center, אישור פרשנות, תוצאות, פרטי דומיין, השוואה, מעקב, רכישות, **הדומיינים שלי**, התראות, פרופילים, אינטגרציות, משתמשים, Audit Log | [`src/screens/`](src/screens) |
+| §3 | **בורר סיומות מרובה** — חיפוש, בחירה, ניקוי, «כל הנתמכות»; סיומות מדינה עם דרישות זכאות; סיומת לא-נתמכת אינה נבחרת; בחירה ריקה אינה «הכול» | [`TldPicker.tsx`](src/components/TldPicker.tsx) |
+| §2 | **בדיקה בלחיצה אחת** — «בדוק דומיינים לקנייה עכשיו» לפי הפרופיל, ללא אישור פרשנות בחיפוש ברור | [`interpreter.ts`](src/engine/interpreter.ts) |
+| §5 | **אימות ותוקף** — תשובת ספק חיובית + מחיר בר-תוקף; חלון ≤5 דק׳; שגיאה/Timeout לעולם אינם «פנוי»; רענון כשהתוקף פג | [`engine.ts`](src/engine/engine.ts) |
+| §6 | **דירוג** — מתחיל רק אחרי מעבר תנאי הקנייה; זכירות/קריאות/סיומת/מחיר/חידוש; מדד שלמות נתונים (לא הסתברות רווח) | [`engine.ts`](src/engine/engine.ts) |
+| §3 | **בדוק סיומות אחרות** — כל סיומת נבדקת מחדש כדומיין נפרד; אין העתקת מחיר/זמינות | [`engine.checkOtherTlds`](src/engine/engine.ts) |
+| §9 | **רכישה מתוך האתר** — אישור עם אימות מחדש, שליחת הזמנה לרשם, «נרכש» רק אחרי אימות בחשבון; מחיר קבוע → «ממתין למסירה» | [`PurchaseModal`](src/components/PurchaseModal.tsx), [`acquisition.ts`](src/engine/acquisition.ts) |
+| §10 | **תקציב וכשלים** — אישור ידני כברירת מחדל; מניעת כפילות; Timeout → «לא ידוע» עם בירור לפני ניסיון חוזר | [`store.ts`](src/store/store.ts) |
+| §12 | **שקיפות כיסוי** — מועמדים/נבדקו/אומתו לרכישה + מקורות שלא ענו; אפס תוצאות ≠ «אין פנויים» | [`CoveragePanel`](src/components/ui.tsx) |
+| §8 | **מסכים** — מרכז חיפוש, לקנייה עכשיו, כרטיס דומיין, אישור קנייה, הזמנות, הדומיינים שלי, הגדרות, **יומן בדיקות** | [`src/screens/`](src/screens) |
 
-### תוספות v1.2
+מודל הנתונים תואם את חוזה הנתונים (§11): search / candidate / verification / price / purchase_result / order,
+כאשר `purchasable_now` נגזר בצד השרת בלבד. קריטריוני הקבלה (§13, AC-1..AC-13) מיושמים, כולל AC-6:
+שם המסומן «רשום» אצל הספק חסום מרישום ללא קשר לכל טענה אחרת.
 
-- **חיפוש כללי כברירת מחדל** — פעולה ראשית «בדוק הזדמנויות בכל הדומיינים»: סריקה בכל התחומים ובכל הסיומות הנתמכות, ללא מילות מפתח/אורך/שפה. תחום, שפה, סיומת ואורך הם מסננים אופציונליים. ([`interpreter.ts`](src/engine/interpreter.ts))
-- **שקיפות כיסוי** — מקורות שנבדקו, סיומות מכוסות, מספר מועמדים, תאריך עדכון וכשלים; סימון תוצאה חלקית. ([`CoveragePanel`](src/components/ui.tsx))
-- **דירוג בחיפוש כללי** — רכיב «התאמה לתחום» אינו מחושב והמשקלים מנורמלים ל-100%; ללא ענישה על אי-שיוך לענף; תצוגת טווח שווי משוער ממקור עסקאות כשקיים, אחרת «שם בתקציב» ללא טענת הנחה. ([`engine.ts`](src/engine/engine.ts))
-- **רכישה ישירה באתר (§8.1)** — כפתור קנייה פותח אישור הזמנה עם אימות מחדש של מחיר/מסים/עמלות/חידוש, אישור מפורש, שליחת הזמנה לרשם, מסלולי רכישה לפי סטטוס, ומצב «לא ידוע» (Timeout) עם בירור לפני ניסיון נוסף. ([`acquisition.ts`](src/engine/acquisition.ts), [`PurchaseModal`](src/components/PurchaseModal.tsx))
-- **הדומיינים שלי (S-13)** — דומיינים שנרכשו ואומתו: רשם, בעלים, תפוגה, חידוש, קבלה ואימות דוא״ל. ([`MyDomains.tsx`](src/screens/MyDomains.tsx))
+## סטאק
 
-המימוש נאמן לסעיפים 2–18 באפיון: מודל הנתונים (§12), תדירויות בדיקה (§3.1), מחזור חיי דומיין (§4),
-משקלי דירוג (§7), רכישה בטוחה וישירה (§8, §8.1), הרשאות (§13), מקרי קצה (§15) וקריטריוני קבלה (§17, AC-01..AC-19).
+React 18 · TypeScript · Vite · Tailwind CSS · Zustand · React Router. עברית RTL מלא.
 
-## סטאק (Stack)
-
-React 18 · TypeScript · Vite · Tailwind CSS · Zustand · React Router. עברית RTL מלא + אנגלית.
-
-## הרצה מקומית (Run locally)
+## הרצה מקומית
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173/domain-opportunity-engine/
-npm run build    # פרודקשן ל-dist/
+npm run build
 ```
 
-## פריסה (Deploy)
+## מה לא כלול בדמו
 
-הדמו מתפרסם כאתר סטטי ל-GitHub Pages מענף `gh-pages`
-(`base` מוגדר בקובץ [`vite.config.ts`](vite.config.ts)).
-
-## מה לא כלול (Out of scope for this demo)
-
-חיבורי RDAP/רשם/תשלום אמיתיים, שרת, תורים ו-Secrets Vault — אלה מתוארים באפיון (§10–11)
-ומחייבים תשתית שרת וסודות. כאן הם מיוצגים על ידי מנוע סימולציה דטרמיניסטי כדי להדגים את
-לוגיקת המוצר מקצה לקצה ללא סיכון.
+חיבורי RDAP/רשם/תשלום אמיתיים, שרת, תורים וכספת סודות (§10–11) — מדומים במנוע דטרמיניסטי מקומי.
+בדיקות תשלום נעשות ב-Sandbox; רכישה אמיתית דורשת הרשאה מפורשת ותקציב מוגדר.
 
 ---
 
