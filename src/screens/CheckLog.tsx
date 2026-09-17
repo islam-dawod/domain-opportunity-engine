@@ -12,7 +12,7 @@ const resultMeta: Record<string, { t: string; c: string }> = {
 }
 
 export default function CheckLog() {
-  const { checkLog } = useStore()
+  const { checkLog, guardEvents, health } = useStore()
   const [filter, setFilter] = useState('all')
   const list = filter === 'all' ? checkLog : checkLog.filter((e) => e.result === filter)
 
@@ -20,6 +20,31 @@ export default function CheckLog() {
     return <Section title="יומן בדיקות (מנהלים)" sub="מקורות, כשלים, תוקף נתונים וסיבות הסרת תוצאות."><Empty>אין רשומות. הרץ בדיקה כדי לצבור יומן אימותים.</Empty></Section>
 
   return (
+    <div className="space-y-5">
+    <Section title="ניטור חיבורים ועצירה אוטומטית" sub="עלייה בשגיאות > 5% או 3 כשלים רצופים → השהיית החיבור; אין מקור חלופי לא מאומת.">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {health.map((h) => (
+          <div key={h.provider} className={`stat ${h.suspended ? 'border-bad/40' : h.errorRatePct > 5 ? 'border-warn/40' : ''}`}>
+            <div className="flex items-center justify-between"><span className="font-semibold text-white" dir="ltr">{h.provider}</span>{h.suspended ? <span className="rounded-full border border-bad/40 bg-bad/10 px-2 py-0.5 text-[11px] text-bad">מושהה</span> : <span className="rounded-full border border-good/40 bg-good/10 px-2 py-0.5 text-[11px] text-good">פעיל</span>}</div>
+            <div className="mt-1 text-xs text-muted">בדיקות {h.checks} · שגיאות {h.failures} ({h.errorRatePct}%) · רצופות {h.consecutiveFailures}</div>
+          </div>
+        ))}
+      </div>
+      {guardEvents.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 text-xs font-semibold text-muted">אירועי הפרת כלל</div>
+          <ul className="space-y-1.5">
+            {guardEvents.slice(0, 8).map((g) => (
+              <li key={g.id} className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/5 p-2 text-xs">
+                <span className="text-warn">⚠</span>
+                <div><span className="font-semibold text-white" dir="ltr">{g.domain}</span> · <span className="text-muted">{g.kind}</span> — {g.action}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Section>
+
     <Section
       title={`יומן בדיקות · ${list.length}`}
       sub="שקיפות מלאה: כל אימות מול הספק עם מקור, תשובה וחותמת זמן. שגיאה או מידע חסר לעולם אינם מתורגמים לפנוי."
@@ -50,5 +75,6 @@ export default function CheckLog() {
         </table>
       </div>
     </Section>
+    </div>
   )
 }

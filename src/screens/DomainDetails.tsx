@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store'
-import { Section, Empty, ScoreRing, PurchaseTypePill, ClassBadge, Confidence, RiskDot, SectorTag, PriceRangeTag, ValidityBadge } from '../components/ui'
+import { Section, Empty, ScoreRing, PurchaseTypePill, ClassBadge, Confidence, RiskDot, SectorTag, PriceRangeTag, ValidityBadge, StateBadge, Provenance } from '../components/ui'
 import PurchaseModal from '../components/PurchaseModal'
 import { PURCHASE_TYPE_META } from '../engine/config'
 import { evaluateAcquisition, isFresh } from '../engine/acquisition'
@@ -20,11 +20,12 @@ export default function DomainDetails() {
 
   const decision = evaluateAcquisition(o, profile, spentToday, spentMonth)
   const fresh = isFresh(o)
+  const buyable = o.canPurchase && fresh
   const meta = PURCHASE_TYPE_META[o.purchaseType]
 
   const runCheckOther = () => {
     const tlds = (currentTask?.selectedTlds ?? selectedTlds).filter((t) => t !== o.tld)
-    setAlts(checkOtherTlds(o.baseName, tlds.length ? tlds : ['.com', '.net', '.io', '.co'], currentTask!, profile))
+    setAlts(checkOtherTlds(o.baseName, tlds.length ? tlds : ['.com', '.net', '.io', '.co'], currentTask!))
   }
 
   return (
@@ -34,19 +35,22 @@ export default function DomainDetails() {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-extrabold text-white" dir="ltr">{o.domain}</h1>
+            <StateBadge state={o.state} />
             <ClassBadge c={o.classification} />
             <PurchaseTypePill type={o.purchaseType} />
             <SectorTag sector={o.sector} />
           </div>
           {o.punycode && <div className="mt-1 text-xs text-warn" dir="ltr">Punycode: {o.punycode} — דגל סיכון IDN</div>}
+          <div className="mt-1"><Provenance o={o} /></div>
           <p className="mt-1 max-w-2xl text-sm text-muted">{o.reason}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2"><ValidityBadge o={o} /><PriceRangeTag o={o} />{o.deliveryEstimate && <span className="chip !text-warn">זמן מסירה: {o.deliveryEstimate}</span>}</div>
+          {!o.canPurchase && o.disabledReason && <div className="mt-1 text-xs text-warn">⚠ {o.disabledReason}</div>}
         </div>
         <div className="mr-auto flex items-center gap-2">
           <button className="btn-ghost" onClick={runCheckOther}>בדוק סיומות אחרות</button>
-          {fresh
-            ? <button className="btn-primary disabled:opacity-40" onClick={() => setBuying(true)} disabled={o.classification === 'blocked'}>{meta.buy}</button>
-            : <button className="btn-ghost" onClick={() => refresh(o.id)}>רענן אימות</button>}
+          {!fresh
+            ? <button className="btn-ghost" onClick={() => refresh(o.id)}>רענן אימות</button>
+            : <button className="btn-primary disabled:opacity-40" onClick={() => setBuying(true)} disabled={!buyable}>{meta.buy}</button>}
         </div>
       </div>
       {buying && <PurchaseModal opp={o} onClose={() => setBuying(false)} />}
@@ -82,11 +86,11 @@ export default function DomainDetails() {
         <Section title="עלויות ואימות">
           <dl className="space-y-2 text-sm">
             {[
-              ['מחיר כולל', money(o.price.total, o.price.currency)],
-              ['עמלות', money(o.price.fees, o.price.currency)],
-              ['מס', o.price.taxStatus],
-              ['חידוש שנתי', money(o.price.renewalPrice, o.price.currency)],
-              ['ספק', o.price.provider],
+              ['מחיר כולל', o.priceKnown ? money(o.price.total, o.price.currency) : 'לא זמין'],
+              ['עמלות', o.priceKnown ? money(o.price.fees, o.price.currency) : '—'],
+              ['מס', o.priceKnown ? o.price.taxStatus : '—'],
+              ['חידוש שנתי', o.renewalKnown ? money(o.price.renewalPrice, o.price.currency) : 'חסר — חוסם קנייה'],
+              ['ספק מחיר', o.price.provider],
               ['וותק', o.ageYears ? `${o.ageYears} שנים` : 'חדש'],
               ['Referring domains', o.referringDomains ? o.referringDomains.toLocaleString() : 'חסר'],
             ].map(([k, v]) => (
@@ -94,10 +98,12 @@ export default function DomainDetails() {
             ))}
           </dl>
           <div className="mt-4 rounded-xl border border-line bg-panel2/40 p-3 text-xs">
-            <div className="font-semibold text-white">אימות ספק</div>
-            <div className="mt-1 text-muted">אומת {timeAgo(o.verification.verifiedAt)} · מקור {o.verification.provider}</div>
-            <div className="text-muted">תוקף {fresh ? timeUntil(o.verification.validUntil) : 'פג — נדרש רענון'} · ref {o.verification.responseReference}</div>
-            <div className="text-muted">זמינות לרישום: {o.verification.availabilityRegistration ? 'כן' : 'לא'} · למכירה קבועה: {o.verification.availabilityFixedSale ? 'כן' : 'לא'}</div>
+            <div className="font-semibold text-white">אימות זמינות (חוזה שרת)</div>
+            <div className="mt-1 text-muted">verification_id: <span dir="ltr">{o.verification.verificationId ?? '— טרם אומת'}</span></div>
+            <div className="text-muted">מצב: {o.state} · סביבה: {o.verification.environment} · adapter {o.verification.adapterVersion}</div>
+            <div className="text-muted">אומת {o.verification.verifiedAt ? timeAgo(o.verification.verifiedAt) : '—'} · מקור {o.verification.provider}</div>
+            <div className="text-muted">תוקף {fresh ? timeUntil(o.verification.validUntil!) : 'פג — נדרש רענון'} · ref {o.verification.responseReference}</div>
+            <div className="text-muted">מקור גילוי (נפרד): {o.discoverySource} — אינו קובע זמינות</div>
           </div>
         </Section>
 

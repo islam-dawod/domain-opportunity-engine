@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store'
-import { Section, Empty, ScoreRing, PurchaseTypePill, ClassBadge, Confidence, RiskDot, CoveragePanel, SectorTag, PriceRangeTag, ValidityBadge } from '../components/ui'
+import { Section, Empty, ScoreRing, PurchaseTypePill, ClassBadge, Confidence, RiskDot, CoveragePanel, SectorTag, PriceRangeTag, ValidityBadge, StateBadge, Provenance } from '../components/ui'
 import PurchaseModal from '../components/PurchaseModal'
 import { PURCHASE_TYPE_META } from '../engine/config'
 import { isFresh } from '../engine/acquisition'
@@ -12,6 +12,7 @@ function Card({ o, onBuy }: { o: Opportunity; onBuy: (o: Opportunity) => void })
   const { refresh } = useStore()
   const nav = useNavigate()
   const fresh = isFresh(o)
+  const buyable = o.canPurchase && fresh
   return (
     <div className="card p-4 transition hover:border-brand2/40">
       <div className="flex items-start gap-4">
@@ -19,16 +20,15 @@ function Card({ o, onBuy }: { o: Opportunity; onBuy: (o: Opportunity) => void })
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link to={`/domain/${o.id}`} className="truncate text-lg font-extrabold text-white hover:text-brand2" dir="ltr">{o.domain}</Link>
-            <ClassBadge c={o.classification} />
+            <StateBadge state={o.state} />
             <PurchaseTypePill type={o.purchaseType} />
             <SectorTag sector={o.sector} />
           </div>
-          <p className="mt-1 line-clamp-1 text-sm text-muted">{o.reason}</p>
+          <div className="mt-1"><Provenance o={o} /></div>
           <div className="mt-2 flex flex-wrap items-center gap-2"><ValidityBadge o={o} /><PriceRangeTag o={o} />{o.deliveryEstimate && <span className="chip !text-warn">מסירה: {o.deliveryEstimate}</span>}</div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-            <span>מחיר כולל: <b className="text-white">{money(o.price.total, o.price.currency)}</b></span>
-            <span>חידוש: {money(o.price.renewalPrice, o.price.currency)}</span>
-            <span>מקור: {o.source}</span>
+            <span>מחיר כולל: <b className="text-white">{o.priceKnown ? money(o.price.total, o.price.currency) : <span className="text-warn">לא זמין</span>}</b></span>
+            <span>חידוש: {o.renewalKnown ? money(o.price.renewalPrice, o.price.currency) : <span className="text-warn">חסר</span>}</span>
             <span className="flex items-center gap-1">שלמות נתונים: <Confidence value={o.confidence} /></span>
             {o.risks.length > 0 && <span className="flex items-center gap-1">סיכון: {o.risks.slice(0, 3).map((r, i) => <RiskDot key={i} severity={r.severity} />)}</span>}
           </div>
@@ -36,10 +36,11 @@ function Card({ o, onBuy }: { o: Opportunity; onBuy: (o: Opportunity) => void })
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
         <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => nav(`/domain/${o.id}`)}>פרטים · בדוק סיומות אחרות</button>
+        {!o.canPurchase && o.disabledReason && <span className="text-xs text-warn">{o.disabledReason}</span>}
         <div className="mr-auto flex items-center gap-2">
-          {fresh
-            ? <button className="btn-primary !px-3 !py-1.5 text-xs disabled:opacity-40" onClick={() => onBuy(o)} disabled={o.classification === 'blocked'}>{PURCHASE_TYPE_META[o.purchaseType].buy}</button>
-            : <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => refresh(o.id)}>רענן אימות</button>}
+          {!fresh
+            ? <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => refresh(o.id)}>רענן אימות</button>
+            : <button className="btn-primary !px-3 !py-1.5 text-xs disabled:opacity-40" onClick={() => onBuy(o)} disabled={!buyable}>{PURCHASE_TYPE_META[o.purchaseType].buy}</button>}
         </div>
       </div>
     </div>
@@ -75,7 +76,11 @@ export default function Results() {
       {coverage && <CoveragePanel c={coverage} />}
 
       {opportunities.length === 0 ? (
-        <Section title="תוצאות לקנייה עכשיו"><Empty>לא נמצאו דומיינים התואמים למסננים במקורות שנבדקו. אין זה אומר שאין דומיינים פנויים — נסה סיומות נוספות או תקציב גבוה יותר.</Empty></Section>
+        <Section title="תוצאות לקנייה עכשיו"><Empty>
+          {coverage?.emptyReason === 'verification-unavailable'
+            ? 'שירות האימות אינו זמין — לא ניתן היה להשלים אימות. אין מוצגת רשימה חלופית לא מאומתת.'
+            : 'לא נמצאו התאמות למסננים במקורות שנבדקו. אין זה אומר שאין דומיינים פנויים — נסה סיומות נוספות או תקציב גבוה יותר.'}
+        </Empty></Section>
       ) : (
         <Section
           title={`לקנייה עכשיו · ${list.length}`}

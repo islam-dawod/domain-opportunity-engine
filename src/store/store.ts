@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import type {
   SearchTask, Opportunity, Order, AlertEvent, AuditEvent, SearchProfile,
-  CoverageReport, OwnedDomain, PurchaseQuote, CheckLogEntry, SavedSearch,
+  CoverageReport, OwnedDomain, PurchaseQuote, CheckLogEntry, SavedSearch, GuardEvent, ConnectionHealth,
 } from '../engine/types'
 import { DEFAULT_PROFILE, VALIDITY_MINUTES } from '../engine/config'
 import { interpret } from '../engine/interpreter'
-import { runDiscovery } from '../engine/engine'
+import { runDiscovery, serverVerify } from '../engine/engine'
 import { evaluateAcquisition, makeOrder, makeOwned, buildQuote } from '../engine/acquisition'
 import { uid } from '../engine/util'
 
@@ -28,6 +28,8 @@ interface State {
   opportunities: Opportunity[]
   coverage: CoverageReport | null
   checkLog: CheckLogEntry[]
+  guardEvents: GuardEvent[]
+  health: ConnectionHealth[]
   orders: Order[]
   owned: OwnedDomain[]
   savedSearches: SavedSearch[]
@@ -65,6 +67,8 @@ export const useStore = create<State>((set, get) => ({
   opportunities: [],
   coverage: null,
   checkLog: [],
+  guardEvents: [],
+  health: [],
   orders: [],
   owned: [],
   savedSearches: [],
@@ -108,17 +112,18 @@ export const useStore = create<State>((set, get) => ({
     if (!task.selectedTlds.length) return // empty TLD selection is not "all" (spec v2.0 §3)
     set({ running: true })
     setTimeout(() => {
-      const { opportunities, coverage, checkLog } = runDiscovery(task, get().profile)
+      const { opportunities, coverage, checkLog, guardEvents, health } = runDiscovery(task, get().profile)
 
       // alerts only for newly-available high-value opportunities (not a waitlist)
       const alerts: AlertEvent[] = []
-      for (const o of opportunities.filter((o) => o.score >= task.minimumScore).slice(0, 6)) {
+      for (const o of opportunities.filter((o) => o.canPurchase && o.score >= task.minimumScore).slice(0, 6)) {
         if (o.score >= 88) alerts.push({ id: uid('alert'), domain: o.domain, channel: 'email', title: 'הזדמנות זמינה עכשיו', body: `${o.domain} · ציון ${o.score} · ${o.recommendation}`, at: new Date().toISOString(), read: false })
       }
 
       set((s) => ({
         running: false, currentTask: task, draftTask: null,
         tasks: [task, ...s.tasks], opportunities, coverage, checkLog: [...checkLog, ...s.checkLog].slice(0, 400),
+        guardEvents: [...guardEvents, ...s.guardEvents].slice(0, 200), health,
         alerts: [...alerts, ...s.alerts],
         audit: [logAudit('user', 'בדיקת דומיינים לקנייה עכשיו', task.queryName, `מועמדים ${coverage.candidates} · נבדקו ${coverage.checked} · אומתו לרכישה ${coverage.verifiedForPurchase}${coverage.partial ? ' · כיסוי חלקי' : ''}`), ...s.audit],
       }))
@@ -133,12 +138,27 @@ export const useStore = create<State>((set, get) => ({
     if (!opp) return
 
     const decision = evaluateAcquisition(opp, s.profile, s.spentToday, s.spentMonth)
-    // block on failed safety, stale validity, or insufficient balance (spec v2.0 §5, §10)
+    // block on failed safety, stale validity, or insufficient balance (correction §8, §10)
     if (!decision.allow || !quote.available || !quote.balanceOk) {
       set((st) => ({
         orders: [makeOrder(opp, 'failed', quote), ...st.orders],
         alerts: [{ id: uid('alert'), domain: opp.domain, channel: 'inapp', title: 'רכישה נחסמה', body: !quote.balanceOk ? 'יתרה/תקציב לא מספיקים' : !quote.available ? 'נתון פג תוקף — נדרש רענון' : 'בקרת בטיחות נכשלה', at: new Date().toISOString(), read: false }, ...st.alerts],
         audit: [logAudit('system', 'חסימת רכישה', opp.domain, !quote.balanceOk ? 'יתרה/תקציב' : !quote.available ? 'תוקף' : 'בטיחות'), ...st.audit],
+      }))
+      return
+    }
+
+    // server-side live re-verification — the display is never the source of truth (correction §8)
+    const sv = serverVerify(opp)
+    if (!sv.ok) {
+      const takenNow = sv.reason === 'taken'
+      set((st) => ({
+        // a domain taken after the check flips to REGISTERED and leaves the buy-now list — no false success
+        opportunities: st.opportunities.map((o) => o.id === oppId && takenNow ? { ...o, canPurchase: false, state: 'REGISTERED', disabledReason: 'נתפס לאחר הבדיקה' } : o),
+        orders: [makeOrder(opp, 'failed', quote), ...st.orders],
+        guardEvents: takenNow ? [{ id: uid('g'), kind: 'taken-after-check', domain: opp.domain, provider: quote.provider, action: 'בדיקה לפני רכישה עצרה — אין הצגת הצלחה כוזבת', at: new Date().toISOString() }, ...st.guardEvents] : st.guardEvents,
+        alerts: [{ id: uid('alert'), domain: opp.domain, channel: 'inapp', title: sv.reason === 'taken' ? 'נתפס לפני הרישום' : sv.reason === 'price-changed' ? 'המחיר השתנה — נדרש אישור חדש' : 'נדרש רענון אימות', body: sv.reason === 'price-changed' ? `מחיר חדש ${quote.currency} ${sv.newTotal}` : opp.domain, at: new Date().toISOString(), read: false }, ...st.alerts],
+        audit: [logAudit('system', 'בדיקת שרת לפני רכישה נכשלה', opp.domain, sv.reason ?? ''), ...st.audit],
       }))
       return
     }

@@ -9,6 +9,7 @@ import Compare from './screens/Compare'
 import Purchases from './screens/Purchases'
 import MyDomains from './screens/MyDomains'
 import CheckLog from './screens/CheckLog'
+import RegressionTests from './screens/RegressionTests'
 import Alerts from './screens/Alerts'
 import Profiles from './screens/Profiles'
 import Integrations from './screens/Integrations'
@@ -24,6 +25,7 @@ const NAV = [
   { to: '/alerts', label: 'התראות', icon: '🔔', id: 'S-08' },
   { to: '/profiles', label: 'הגדרות', icon: '⚙', id: '' },
   { to: '/check-log', label: 'יומן בדיקות', icon: '📋', id: '' },
+  { to: '/guard-tests', label: 'בדיקות רגרסיה', icon: '🛡', id: '' },
   { to: '/integrations', label: 'אינטגרציות', icon: '🔌', id: '' },
   { to: '/users', label: 'משתמשים', icon: '👤', id: '' },
   { to: '/audit', label: 'Audit Log', icon: '📜', id: '' },
@@ -94,6 +96,7 @@ export default function App() {
             <Route path="/purchases" element={<Purchases />} />
             <Route path="/my-domains" element={<MyDomains />} />
             <Route path="/check-log" element={<CheckLog />} />
+            <Route path="/guard-tests" element={<RegressionTests />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/profiles" element={<Profiles />} />
             <Route path="/integrations" element={<Integrations />} />

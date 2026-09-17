@@ -60,14 +60,35 @@ export interface ScoreComponent {
   checks: string
 }
 
-// Verified availability + price (spec v2.0 §11: "אימות" + "מחיר").
+// Hard server-side verification states (correction spec §4).
+// Only AVAILABLE_VERIFIED (registration) and FIXED_PRICE_VERIFIED are purchasable.
+export type VerificationState =
+  | 'UNVERIFIED'
+  | 'CHECKING'
+  | 'AVAILABLE_VERIFIED'
+  | 'REGISTERED'
+  | 'UNKNOWN'
+  | 'ERROR'
+  | 'CONFLICT'
+  | 'STALE'
+  | 'FIXED_PRICE_VERIFIED'
+  | 'UNSUPPORTED'
+
+// Availability evidence (correction spec §5). verificationId is null unless a valid provider
+// response was received — no id means no "available" label and no purchase.
 export interface Verification {
+  verificationId: string | null // verification_id
+  state: VerificationState // normalized internal state
   availabilityRegistration: boolean
   availabilityFixedSale: boolean
-  verifiedAt: string // verified_at
-  validUntil: string // valid_until — the ≤5 min status/price window
-  provider: string
-  responseReference: string // response_reference
+  verifiedAt: string | null // verified_at — written ONLY after a valid provider response
+  validUntil: string | null // valid_until — from check time, not extended on cache read
+  provider: string // the availability provider (registrar) — NOT the discovery feed
+  environment: 'production' | 'sandbox' // no sandbox/demo evidence in production results
+  operation: string
+  normalizedStatus: string
+  responseReference: string // provider_response_reference
+  adapterVersion: string
 }
 
 export interface PriceQuote {
@@ -92,12 +113,18 @@ export interface Opportunity {
   sld: string
   tld: string // suffix
   punycode?: string
-  source: string
+  // discovery source (candidate feed/DB/model) — kept SEPARATE from availability verification
+  // and it never determines availability (correction spec §4, §6).
+  discoverySource: string
   purchaseType: PurchaseType
-  // purchasable_now is derived server-side only (spec v2.0 §11)
-  purchasableNow: boolean
+  state: VerificationState
+  // can_purchase is derived server-side only from valid evidence + exact domain + supported TLD
+  // + valid price + eligibility + budget; never set by browser/admin/LLM (correction spec §4).
+  canPurchase: boolean
   disabledReason?: string
-  deliveryEstimate?: string // delivery_estimate (fixed-price)
+  priceKnown: boolean // an unknown price is never shown as a default price (correction spec §6)
+  renewalKnown: boolean
+  deliveryEstimate?: string
   verification: Verification
   // enrichment
   ageYears: number
@@ -118,7 +145,7 @@ export interface Opportunity {
   taskId: string
 }
 
-// Coverage transparency (spec v2.0 §5, §12).
+// Coverage transparency (spec v2.0 §5, §12; correction §6).
 export interface CoverageReport {
   sourcesChecked: string[]
   sourcesFailed: string[]
@@ -128,6 +155,29 @@ export interface CoverageReport {
   verifiedForPurchase: number
   updatedAt: string
   partial: boolean
+  // distinguishes "no matches" from "couldn't complete verification" (correction §6)
+  verificationServiceAvailable: boolean
+  emptyReason?: 'no-matches' | 'verification-unavailable'
+}
+
+// A monitoring / auto-stop event (correction spec §9).
+export interface GuardEvent {
+  id: string
+  kind: 'evidence-missing' | 'label-without-id' | 'response-mismatch' | 'error-rate' | 'taken-after-check' | 'duplicate-order'
+  domain: string
+  provider: string
+  action: string
+  at: string
+}
+
+// Per-connection health with suspend-after-failures (correction spec §9).
+export interface ConnectionHealth {
+  provider: string
+  checks: number
+  failures: number
+  consecutiveFailures: number
+  errorRatePct: number
+  suspended: boolean
 }
 
 // A verification record for the admin check log (spec v2.0 §8 "יומן בדיקות").

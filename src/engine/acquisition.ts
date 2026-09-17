@@ -7,7 +7,7 @@ export interface AcquisitionDecision { checks: AcquisitionCheck[]; allow: boolea
 
 // Whether a result is currently purchasable given its ≤5-min validity window (spec v2.0 §5).
 export function isFresh(opp: Opportunity): boolean {
-  return new Date(opp.verification.validUntil).getTime() > Date.now()
+  return !!opp.verification.validUntil && new Date(opp.verification.validUntil).getTime() > Date.now()
 }
 
 // Re-verify and produce a buy-time quote (spec v2.0 §9).
@@ -19,7 +19,8 @@ export function buildQuote(opp: Opportunity, profile: SearchProfile, spentToday:
   const balanceOk = spentToday + total <= profile.dailyBudget && spentMonth + total <= profile.monthlyBudget
   return {
     domain: opp.domain, provider: opp.price.provider, purchaseType: opp.purchaseType,
-    available: opp.purchasableNow && isFresh(opp),
+    // available requires a verified state, a valid id, a known price and a fresh window
+    available: opp.canPurchase && !!opp.verification.verificationId && opp.priceKnown && isFresh(opp),
     base, taxes, fees, total, currency: opp.price.currency,
     registrationYears: opp.price.term, renewalPrice: opp.price.renewalPrice, autoRenew: true,
     ownerContact: profile.name.split('—')[0].trim() + ' · billing@elitiq.com',
@@ -34,6 +35,8 @@ export function evaluateAcquisition(opp: Opportunity, profile: SearchProfile, sp
   const total = opp.price.total
   const highRisk = opp.risks.some((r) => r.severity === 'high')
   const checks: AcquisitionCheck[] = [
+    { label: 'זמינות מאומתת (verification_id)', ok: !!opp.verification.verificationId && (opp.state === 'AVAILABLE_VERIFIED' || opp.state === 'FIXED_PRICE_VERIFIED'), detail: opp.verification.verificationId ? opp.state : 'אין ראיה תקפה' },
+    { label: 'מחיר ידוע ובתוקף', ok: opp.priceKnown, detail: opp.priceKnown ? 'ידוע' : 'לא זמין' },
     { label: 'מחיר כולל מתחת לתקרת דומיין', ok: total <= profile.maxPrice, detail: `${total} / ${profile.maxPrice}` },
     { label: 'מחיר חידוש מתחת לסף', ok: opp.price.renewalPrice <= profile.maxRenewalPrice, detail: `${opp.price.renewalPrice} / ${profile.maxRenewalPrice}` },
     { label: 'תקציב יומי לא נוצל', ok: spentToday + total <= profile.dailyBudget, detail: `${spentToday + total} / ${profile.dailyBudget}` },

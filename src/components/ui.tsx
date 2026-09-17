@@ -1,4 +1,4 @@
-import type { PurchaseType, Opportunity, CoverageReport } from '../engine/types'
+import type { PurchaseType, Opportunity, CoverageReport, VerificationState } from '../engine/types'
 import { PURCHASE_TYPE_META } from '../engine/config'
 import { money, timeAgo } from '../engine/util'
 import { isFresh } from '../engine/acquisition'
@@ -12,6 +12,24 @@ const toneClass: Record<string, string> = {
 
 export function PurchaseTypePill({ type }: { type: PurchaseType }) {
   const m = PURCHASE_TYPE_META[type]
+  return <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${toneClass[m.tone]}`}>{m.he}</span>
+}
+
+const STATE_META: Record<VerificationState, { he: string; tone: string }> = {
+  AVAILABLE_VERIFIED: { he: 'זמינות מאומתת', tone: 'good' },
+  FIXED_PRICE_VERIFIED: { he: 'מכירה מאומתת', tone: 'warn' },
+  CHECKING: { he: 'בבדיקה', tone: 'muted' },
+  UNVERIFIED: { he: 'טרם אומת', tone: 'muted' },
+  STALE: { he: 'פג תוקף', tone: 'warn' },
+  REGISTERED: { he: 'רשום', tone: 'muted' },
+  CONFLICT: { he: 'סתירה — בבירור', tone: 'bad' },
+  UNKNOWN: { he: 'לא אומת', tone: 'bad' },
+  ERROR: { he: 'שגיאה', tone: 'bad' },
+  UNSUPPORTED: { he: 'לא נתמך', tone: 'muted' },
+}
+// The verification state is server-derived; it gates the availability label (correction §4).
+export function StateBadge({ state }: { state: VerificationState }) {
+  const m = STATE_META[state]
   return <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${toneClass[m.tone]}`}>{m.he}</span>
 }
 
@@ -58,12 +76,24 @@ export function Confidence({ value }: { value: number }) {
   )
 }
 
-// Validity window state for the buy button (spec v2.0 §5).
+// Validity window state for the buy button (spec v2.0 §5). Shows "verified at" only when a
+// real provider check exists (verificationId + verifiedAt) — never on page open (correction §5).
 export function ValidityBadge({ o }: { o: Opportunity }) {
-  const fresh = isFresh(o)
-  return fresh
+  if (!o.verification.verificationId || !o.verification.verifiedAt)
+    return <span className="rounded-full border border-line bg-panel2/60 px-2 py-0.5 text-[11px] text-muted">טרם אומת</span>
+  return isFresh(o)
     ? <span className="rounded-full border border-good/40 bg-good/10 px-2 py-0.5 text-[11px] text-good">אומת {timeAgo(o.verification.verifiedAt)} · בתוקף</span>
-    : <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-[11px] text-warn">ממתין לבדיקה — נדרש רענון</span>
+    : <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-[11px] text-warn">STALE — נדרש רענון</span>
+}
+
+// Availability verification provenance — separated from discovery source (correction §6).
+export function Provenance({ o }: { o: Opportunity }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted">
+      <span>מקור גילוי: <b className="text-white/80">{o.discoverySource}</b></span>
+      <span>אימות זמינות: <b className="text-white/80">{o.verification.verificationId ? o.verification.provider : '— טרם אומת'}</b></span>
+    </div>
+  )
 }
 
 export function Section({ title, sub, children, action }: { title: string; sub?: string; children: React.ReactNode; action?: React.ReactNode }) {

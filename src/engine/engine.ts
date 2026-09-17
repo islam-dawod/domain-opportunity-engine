@@ -1,9 +1,11 @@
-import type { SearchTask, Opportunity, PurchaseType, RiskFinding, ScoreComponent, SearchProfile, PriceRange, CoverageReport, CheckLogEntry, Verification, PriceQuote } from './types'
+import type { SearchTask, Opportunity, PurchaseType, RiskFinding, ScoreComponent, SearchProfile, PriceRange, CoverageReport, CheckLogEntry, Verification, VerificationState, PriceQuote, GuardEvent, ConnectionHealth } from './types'
 import { SCORE_COMPONENTS, REGISTRARS, PURCHASABLE_TLDS, SCAN_SOURCES, REGISTERED_TEST_NAMES, VALIDITY_MINUTES } from './config'
 import { makeRng, pick, rint, clamp, uid } from './util'
 
 const PREFIXES = ['go', 'get', 'my', 'the', 'pro', 'smart', 'prime', 'next', 'true', 'open']
 const SUFFIXES = ['ly', 'hub', 'ify', 'io', 'now', 'wise', 'base', 'flow', 'labs', 'zone', 'pro', 'go']
+const ADAPTER_VERSION = 'adapter@2.1.0'
+const DISCOVERY_FEEDS = ['Dropped-Names Feed', 'Names DB', 'Suggest Model']
 
 const GENERAL_ROOTS: { word: string; sector: string }[] = [
   { word: 'visa', sector: 'הגירה' }, { word: 'migrate', sector: 'הגירה' }, { word: 'relocate', sector: 'הגירה' },
@@ -16,7 +18,6 @@ const GENERAL_ROOTS: { word: string; sector: string }[] = [
   { word: 'nova', sector: 'כללי' }, { word: 'vertex', sector: 'כללי' }, { word: 'orbit', sector: 'כללי' },
   { word: 'peak', sector: 'כללי' }, { word: 'atlas', sector: 'כללי' }, { word: 'lumen', sector: 'כללי' },
 ]
-
 const SECTOR_HINTS: [RegExp, string][] = [
   [/visa|migrat|reloc|immig/i, 'הגירה'], [/legal|law|counsel|right/i, 'משפטים'],
   [/estate|realty|propert|home/i, 'נדל״ן'], [/cloud|lab|stack|app|tech|dev|ai/i, 'טכנולוגיה'],
@@ -25,13 +26,12 @@ const SECTOR_HINTS: [RegExp, string][] = [
 ]
 const classifySector = (sld: string) => SECTOR_HINTS.find(([re]) => re.test(sld))?.[1] ?? 'כללי'
 
-function detectRisks(rng: () => number, sld: string, tld: string): RiskFinding[] {
+function detectRisks(rng: () => number, sld: string): RiskFinding[] {
   const risks: RiskFinding[] = []
   if (/[0-9]/.test(sld) && rng() > 0.4) risks.push({ type: 'תווים מבלבלים', severity: 'medium', source: 'Lexical', details: 'מספרים שעלולים להתחלף באותיות' })
   if (sld.includes('-')) risks.push({ type: 'מקף בשם', severity: 'low', source: 'Lexical', details: 'מקפים פוגעים בזכירות' })
   if (['amaz', 'goog', 'face', 'insta', 'micro', 'paypa'].some((b) => sld.includes(b))) risks.push({ type: 'דמיון למותג', severity: 'high', source: 'Trademark Data', details: 'דמיון לסימן מסחר מוכר — אינדיקציה בלבד' })
   if (rng() > 0.9) risks.push({ type: 'היסטוריית ספאם', severity: 'high', source: 'Web History', details: 'סימני ספאם בתוכן עבר' })
-  else if (rng() > 0.75) risks.push({ type: 'אינדוקס חלקי', severity: 'low', source: 'SEO', details: 'כיסוי אינדוקס נמוך' })
   return risks
 }
 
@@ -39,7 +39,6 @@ function activeComponents(weights: Record<string, number>) {
   const total = SCORE_COMPONENTS.reduce((s, c) => s + (weights[c.key] ?? c.weight), 0)
   return SCORE_COMPONENTS.map((c) => ({ comp: c, w: (weights[c.key] ?? c.weight) / total }))
 }
-
 function componentScores(rng: () => number, task: SearchTask, sld: string, tld: string, total: number, renewal: number, ageYears: number, referringDomains: number, risks: RiskFinding[], weights: Record<string, number>): ScoreComponent[] {
   const len = sld.length
   const brandability = clamp(90 - Math.abs(8 - len) * 5 + rint(rng, -8, 8))
@@ -54,7 +53,6 @@ function componentScores(rng: () => number, task: SearchTask, sld: string, tld: 
   const raw: Record<string, number> = { brandability, length, tldQuality, price, renewal: renewalScore, age, links, cleanliness, legal }
   return activeComponents(weights).map(({ comp, w }) => ({ ...comp, weight: w, raw: Math.round(raw[comp.key]) }))
 }
-
 function classify(score: number, risks: RiskFinding[]): Opportunity['classification'] {
   if (risks.some((r) => r.severity === 'high' && (r.type.includes('מותג') || r.type.includes('ספאם')))) return 'blocked'
   if (score >= 90) return 'exceptional'
@@ -68,39 +66,64 @@ const PT_REASON: Record<PurchaseType, string> = {
   premium: 'Premium פנוי לרישום', 'fixed-price': 'מוצע במחיר קבוע (Buy Now)',
 }
 
-// Build a verified enrichment + quote for an available candidate.
-function makeVerified(rng: () => number, task: SearchTask, sld: string, tld: string, pt: PurchaseType, source: string) {
-  const premium = pt === 'premium'
-  const base = premium ? rint(rng, 120, task.maxTotalPrice + 400) : pt === 'fixed-price' ? rint(rng, 60, task.maxTotalPrice + 200) : rint(rng, 8, task.maxTotalPrice + 40)
+// ── Hard verification contract (correction spec §4) ──────────────────────────
+// The registrar/availability provider is the ONLY authority for availability. A discovery
+// feed never determines it. Failures never fall back to a positive status.
+export interface VerifyResult {
+  state: VerificationState
+  availabilityRegistration: boolean
+  availabilityFixedSale: boolean
+  verificationId: string | null
+  provider: string
+  normalizedStatus: string
+  ok: boolean // provider call succeeded
+  detail: string
+}
+
+export function verifyCandidate(rng: () => number, sld: string, tld: string, task: SearchTask): VerifyResult {
+  const provider = pick(rng, REGISTRARS)
+  // provider-level failures (Timeout/429/500/malformed) → never "available"
+  if (rng() > 0.94) return { state: 'ERROR', availabilityRegistration: false, availabilityFixedSale: false, verificationId: null, provider, normalizedStatus: 'ERROR', ok: false, detail: 'Timeout / תשובה פגומה — לא מתורגם לפנוי' }
+  if (!PURCHASABLE_TLDS.includes(tld)) return { state: 'UNSUPPORTED', availabilityRegistration: false, availabilityFixedSale: false, verificationId: null, provider, normalizedStatus: 'UNSUPPORTED', ok: true, detail: 'סיומת לא נתמכת' }
+  // names the provider reports as registered are blocked from registration regardless of any
+  // feed/AI claim (correction §4, §10 — not a UI blocklist; it is the provider response)
+  if (REGISTERED_TEST_NAMES.includes(sld)) return { state: 'REGISTERED', availabilityRegistration: false, availabilityFixedSale: false, verificationId: null, provider: 'RDAP+Registry', normalizedStatus: 'REGISTERED', ok: true, detail: 'הרשם מדווח רשום — חסום מרישום' }
+
+  const r = rng()
+  // fixed-price secondary market (only when opted in): registered but verified for sale
+  if (task.purchaseModes.includes('fixed-price') && r > 0.9) {
+    return { state: 'FIXED_PRICE_VERIFIED', availabilityRegistration: false, availabilityFixedSale: true, verificationId: 'ver_' + uid('v').slice(-10), provider, normalizedStatus: 'FIXED_PRICE', ok: true, detail: 'הצעת מכירה מאומתת' }
+  }
+  // conflict: feed suggested dropped, registrar positive, but recent registration evidence contradicts
+  if (r > 0.82) return { state: 'CONFLICT', availabilityRegistration: false, availabilityFixedSale: false, verificationId: null, provider, normalizedStatus: 'CONFLICT', ok: true, detail: 'סתירה עם ראיית רישום עדכנית — בבירור' }
+  // registrar explicitly reports registered
+  if (r > 0.55) return { state: 'REGISTERED', availabilityRegistration: false, availabilityFixedSale: false, verificationId: null, provider, normalizedStatus: 'REGISTERED', ok: true, detail: 'הרשם מדווח רשום' }
+  // explicit positive availability → the only path to a purchasable registration result
+  return { state: 'AVAILABLE_VERIFIED', availabilityRegistration: true, availabilityFixedSale: false, verificationId: 'ver_' + uid('v').slice(-10), provider, normalizedStatus: 'AVAILABLE', ok: true, detail: 'זמינות חיובית מפורשת מהרשם' }
+}
+
+function makePriceQuote(rng: () => number, task: SearchTask, premium: boolean, provider: string, validUntil: string): { price: PriceQuote; base: number; total: number; renewal: number; priceKnown: boolean; renewalKnown: boolean } {
+  // some verified-available names still lack a valid quote → shown without a price, not purchasable
+  const priceKnown = rng() > 0.12
+  const renewalKnown = priceKnown && rng() > 0.08
+  const base = premium ? rint(rng, 120, task.maxTotalPrice + 400) : rint(rng, 8, task.maxTotalPrice + 40)
   const fees = rint(rng, 0, 3)
   const taxable = rng() > 0.5
   const taxes = taxable ? Math.round(base * 0.17) : 0
   const total = base + fees + taxes
   const renewal = premium ? Math.round(base * 0.5) : rint(rng, 10, 60)
-  const dropped = pt === 'register-dropped'
-  const ageYears = dropped ? rint(rng, 1, 14) : pt === 'fixed-price' ? rint(rng, 1, 8) : 0
-  const referringDomains = dropped ? rint(rng, 0, 3200) : 0
-  const now = Date.now()
-  const validMin = rint(rng, 3, VALIDITY_MINUTES)
-  const verification: Verification = {
-    availabilityRegistration: pt !== 'fixed-price',
-    availabilityFixedSale: pt === 'fixed-price',
-    verifiedAt: new Date(now - rint(rng, 0, 120) * 1000).toISOString(),
-    validUntil: new Date(now + validMin * 60000).toISOString(),
-    provider: source,
-    responseReference: 'resp_' + uid('r').slice(-8),
+  return {
+    price: { quoteId: priceKnown ? uid('q') : '', total: priceKnown ? total : 0, currency: task.currency, term: 1, fees, taxStatus: taxable ? 'כולל מע״מ' : 'ללא מס', renewalPrice: renewalKnown ? renewal : 0, premium, provider, validUntil },
+    base, total, renewal, priceKnown, renewalKnown,
   }
-  const price: PriceQuote = {
-    quoteId: uid('q'), total, currency: task.currency, term: 1, fees, taxStatus: taxable ? 'כולל מע״מ' : 'ללא מס',
-    renewalPrice: renewal, premium, provider: source, validUntil: verification.validUntil,
-  }
-  return { base, total, renewal, ageYears, referringDomains, verification, price }
 }
 
 export interface DiscoveryResult {
   opportunities: Opportunity[]
   coverage: CoverageReport
   checkLog: CheckLogEntry[]
+  guardEvents: GuardEvent[]
+  health: ConnectionHealth[]
 }
 
 export function runDiscovery(task: SearchTask, profile: SearchProfile): DiscoveryResult {
@@ -110,9 +133,19 @@ export function runDiscovery(task: SearchTask, profile: SearchProfile): Discover
 
   const opportunities: Opportunity[] = []
   const checkLog: CheckLogEntry[] = []
+  const guardEvents: GuardEvent[] = []
   const seen = new Set<string>()
+  const healthMap = new Map<string, ConnectionHealth>()
+  const bumpHealth = (p: string, fail: boolean) => {
+    const h = healthMap.get(p) ?? { provider: p, checks: 0, failures: 0, consecutiveFailures: 0, errorRatePct: 0, suspended: false }
+    h.checks++; if (fail) { h.failures++; h.consecutiveFailures++ } else h.consecutiveFailures = 0
+    h.errorRatePct = Math.round((h.failures / h.checks) * 100)
+    if (h.consecutiveFailures >= 3) h.suspended = true
+    healthMap.set(p, h)
+  }
+
   let checked = 0
-  const targetCandidates = task.general ? 90 : 64
+  const targetCandidates = task.general ? 96 : 68
 
   for (let i = 0; i < targetCandidates && tldPool.length; i++) {
     const root = pick(rng, bases).toLowerCase().replace(/[^a-z]/g, '')
@@ -126,64 +159,74 @@ export function runDiscovery(task: SearchTask, profile: SearchProfile): Discover
     seen.add(domain)
     checked++
 
-    // provider verification (spec v2.0 §5): explicit positive response required to be purchasable.
-    const registeredTest = REGISTERED_TEST_NAMES.includes(sld)
-    const errored = rng() > 0.93
-    if (errored) {
-      checkLog.push({ id: uid('log'), domain, provider: pick(rng, REGISTRARS), result: 'error', detail: 'Timeout / תשובה ריקה — לא מתורגם לפנוי', at: new Date().toISOString(), reference: 'err_' + uid('e').slice(-6) })
-      continue
-    }
-    if (registeredTest) {
-      checkLog.push({ id: uid('log'), domain, provider: 'RDAP', result: 'not-available', detail: 'הספק מדווח רשום — חסום מרישום ללא קשר לטענות אחרות', at: new Date().toISOString(), reference: 'resp_' + uid('r').slice(-6) })
-      continue
-    }
+    const discoverySource = pick(rng, DISCOVERY_FEEDS)
+    const v = verifyCandidate(rng, sld, tld, task)
+    bumpHealth(v.provider, !v.ok)
 
-    // decide purchase type among the enabled paths
-    let pt: PurchaseType
-    const r = rng()
-    if (task.purchaseModes.includes('fixed-price') && r > 0.85) pt = 'fixed-price'
-    else if (r > 0.75 && task.purchaseModes.includes('premium')) pt = 'premium'
-    else if (r > 0.45 && task.purchaseModes.includes('register-dropped')) pt = 'register-dropped'
-    else pt = 'register-new'
-
-    // ~45% of checked candidates are not available now → logged, not shown
-    if (rng() > 0.62) {
-      checkLog.push({ id: uid('log'), domain, provider: pick(rng, REGISTRARS), result: rng() > 0.85 ? 'conflict' : 'not-available', detail: rng() > 0.85 ? 'סתירה בין מקורות — הוסתר עד בירור' : 'אין תשובת זמינות חיובית', at: new Date().toISOString(), reference: 'resp_' + uid('r').slice(-6) })
+    // non-purchasable states never enter the buy-now list; they are logged (correction §6)
+    if (v.state !== 'AVAILABLE_VERIFIED' && v.state !== 'FIXED_PRICE_VERIFIED') {
+      const resultMap: Record<string, CheckLogEntry['result']> = { REGISTERED: 'not-available', CONFLICT: 'conflict', ERROR: 'error', UNSUPPORTED: 'not-available', UNKNOWN: 'error' }
+      checkLog.push({ id: uid('log'), domain, provider: v.provider, result: resultMap[v.state] ?? 'not-available', detail: `${v.state} · ${v.detail}`, at: new Date().toISOString(), reference: v.verificationId ?? 'resp_' + uid('r').slice(-6) })
+      if (v.state === 'CONFLICT') guardEvents.push({ id: uid('g'), kind: 'response-mismatch', domain, provider: v.provider, action: 'CONFLICT — בדיקת מתאם ומטמון לפני חידוש', at: new Date().toISOString() })
       continue
     }
 
-    const source = pick(rng, SCAN_SOURCES)
-    const { base, total, renewal, ageYears, referringDomains, verification, price } = makeVerified(rng, task, sld, tld, pt, source)
-
-    // budget filters (spec v2.0 §4): over-cap candidates are checked but not surfaced
-    if (total > task.maxTotalPrice || renewal > task.maxRenewalPrice) {
-      checkLog.push({ id: uid('log'), domain, provider: source, result: 'removed', detail: `מעל התקציב (סה״כ ${total}/${task.maxTotalPrice}, חידוש ${renewal}/${task.maxRenewalPrice})`, at: new Date().toISOString(), reference: price.quoteId })
+    // gate: a verified-available result MUST carry a verification_id, else it is removed (correction §9)
+    if (!v.verificationId) {
+      guardEvents.push({ id: uid('g'), kind: 'label-without-id', domain, provider: v.provider, action: 'הסרת תוצאה · רישום הפרת כלל · עצירת חיבור', at: new Date().toISOString() })
       continue
     }
 
-    const risks = detectRisks(rng, sld, tld)
-    const components = componentScores(rng, task, sld, tld, total, renewal, ageYears, referringDomains, risks, profile.weights)
+    const pt: PurchaseType = v.state === 'FIXED_PRICE_VERIFIED' ? 'fixed-price' : v.availabilityRegistration && rng() > 0.5 && sld.length <= 8 ? (rng() > 0.6 ? 'premium' : 'register-dropped') : 'register-new'
+    const premium = pt === 'premium'
+    const now = Date.now()
+    const validMin = rint(rng, 3, VALIDITY_MINUTES)
+    const validUntil = new Date(now + validMin * 60000).toISOString()
+    const verifiedAt = new Date(now - rint(rng, 0, 90) * 1000).toISOString()
+    const { price, base, total, renewal, priceKnown, renewalKnown } = makePriceQuote(rng, task, premium, v.provider, validUntil)
+
+    // budget filter only applies to known prices (correction §6: no default price)
+    if (priceKnown && (total > task.maxTotalPrice || renewal > task.maxRenewalPrice)) {
+      checkLog.push({ id: uid('log'), domain, provider: v.provider, result: 'removed', detail: `מעל התקציב (סה״כ ${total}/${task.maxTotalPrice}, חידוש ${renewal}/${task.maxRenewalPrice})`, at: new Date().toISOString(), reference: price.quoteId })
+      continue
+    }
+
+    const verification: Verification = {
+      verificationId: v.verificationId, state: v.state,
+      availabilityRegistration: v.availabilityRegistration, availabilityFixedSale: v.availabilityFixedSale,
+      verifiedAt, validUntil, provider: v.provider, environment: 'production',
+      operation: v.state === 'FIXED_PRICE_VERIFIED' ? 'buy-now-check' : 'availability-check',
+      normalizedStatus: v.normalizedStatus, responseReference: 'resp_' + uid('r').slice(-8), adapterVersion: ADAPTER_VERSION,
+    }
+
+    const dropped = pt === 'register-dropped'
+    const ageYears = dropped ? rint(rng, 1, 14) : pt === 'fixed-price' ? rint(rng, 1, 8) : 0
+    const referringDomains = dropped ? rint(rng, 0, 3200) : 0
+    const risks = detectRisks(rng, sld)
+    const components = componentScores(rng, task, sld, tld, priceKnown ? total : task.maxTotalPrice, renewalKnown ? renewal : task.maxRenewalPrice, ageYears, referringDomains, risks, profile.weights)
     const score = Math.round(components.reduce((s, c) => s + c.raw * c.weight, 0))
     const cls = classify(score, risks)
-
-    const missing = (referringDomains === 0 ? 1 : 0) + (risks.length === 0 ? 1 : 0)
+    const missing = (referringDomains === 0 ? 1 : 0) + (risks.length === 0 ? 1 : 0) + (priceKnown ? 0 : 1)
     const confidence = clamp(rint(rng, 65, 97) - missing * 10)
-
-    const hasRange = pt === 'register-dropped' && rng() > 0.55
+    const hasRange = dropped && priceKnown && rng() > 0.55
     const priceRange: PriceRange | null = hasRange ? { low: Math.round(base * rint(rng, 3, 8)), high: Math.round(base * rint(rng, 9, 30)), source: pick(rng, ['NameBio', 'DNJournal', 'Sedo']), date: `${2023 + rint(rng, 0, 2)}` } : null
 
-    const sector = classifySector(sld)
-    checkLog.push({ id: uid('log'), domain, provider: source, result: 'verified-available', detail: `${PT_REASON[pt]} · תקף עד ${new Date(verification.validUntil).toLocaleTimeString('he-IL')}`, at: verification.verifiedAt, reference: verification.responseReference })
+    // can_purchase derived server-side (correction §4)
+    const canPurchase = cls !== 'blocked' && priceKnown && (pt !== 'fixed-price' || renewalKnown) && verification.environment === 'production'
+
+    checkLog.push({ id: uid('log'), domain, provider: v.provider, result: 'verified-available', detail: `${v.state} · ${PT_REASON[pt]}${priceKnown ? '' : ' · מחיר לא זמין'}`, at: verifiedAt, reference: v.verificationId })
 
     opportunities.push({
       id: uid('opp'), domain, displayName: domain, baseName: sld, sld, tld,
       punycode: /[^\x00-\x7F]/.test(sld) ? 'xn--' + sld : undefined,
-      source, purchaseType: pt, purchasableNow: true,
+      discoverySource, purchaseType: pt, state: v.state, canPurchase,
+      disabledReason: canPurchase ? undefined : !priceKnown ? 'מחיר לא זמין — חסום עד השלמה' : cls === 'blocked' ? 'סיכון גבוה' : 'תנאי רכישה לא הושלמו',
+      priceKnown, renewalKnown,
       deliveryEstimate: pt === 'fixed-price' ? `${rint(rng, 3, 14)} ימים (העברה)` : undefined,
       verification, ageYears, backlinks: referringDomains ? referringDomains * rint(rng, 2, 20) : 0, referringDomains,
-      estTraffic: ageYears ? rint(rng, 0, 12000) : 0, price, sector, priceRange,
+      estTraffic: ageYears ? rint(rng, 0, 12000) : 0, price, sector: classifySector(sld), priceRange,
       score, confidence, classification: cls, components, risks,
-      reason: `${task.general ? `שם בענף ${sector}` : `שם בתחום ${task.semanticTopics[0] ?? sector}`}; ${PT_REASON[pt]}. ${hasRange ? 'קיימות עסקאות השוואה' : 'מתאים לתקציב (ללא טענת רווח)'}.`,
+      reason: `מקור גילוי: ${discoverySource}; אימות זמינות: ${v.provider}. ${PT_REASON[pt]}. ${hasRange ? 'קיימות עסקאות השוואה' : 'מתאים לתקציב (ללא טענת רווח)'}.`,
       recommendation: cls === 'blocked' ? 'חסום — נדרש אימות משפטי' : PT_REASON[pt],
       taskId: task.id,
     })
@@ -191,27 +234,88 @@ export function runDiscovery(task: SearchTask, profile: SearchProfile): Discover
 
   opportunities.sort((a, b) => b.score - a.score || b.confidence - a.confidence)
 
-  const sourcesFailed = rng() > 0.5 ? ['Dropped-Names Feed (429 Rate limit)'] : []
+  const health = [...healthMap.values()]
+  const sourcesFailed = health.filter((h) => h.suspended || h.errorRatePct > 5).map((h) => `${h.provider} (${h.errorRatePct}% שגיאות${h.suspended ? ' · מושהה' : ''})`)
+  const verificationServiceAvailable = health.some((h) => !h.suspended)
   const coverage: CoverageReport = {
     sourcesChecked: SCAN_SOURCES, sourcesFailed, tldsCovered: tldPool,
     candidates: seen.size, checked, verifiedForPurchase: opportunities.length,
     updatedAt: new Date().toISOString(), partial: sourcesFailed.length > 0,
+    verificationServiceAvailable,
+    emptyReason: opportunities.length === 0 ? (verificationServiceAvailable ? 'no-matches' : 'verification-unavailable') : undefined,
   }
 
-  return { opportunities, coverage, checkLog }
+  return { opportunities, coverage, checkLog, guardEvents, health }
 }
 
-// Fresh per-TLD availability check for a base name (spec v2.0 §3 "בדוק סיומות אחרות").
-// Each TLD is a separate domain: nothing is copied from the original.
+// Fresh per-TLD availability check (correction §6: each suffix a separate identity + check).
 export interface TldCheck { tld: string; domain: string; available: boolean; total?: number; currency?: string; reason?: string }
-export function checkOtherTlds(baseName: string, tlds: string[], task: SearchTask, _profile: SearchProfile): TldCheck[] {
+export function checkOtherTlds(baseName: string, tlds: string[], task: SearchTask): TldCheck[] {
   const rng = makeRng(baseName + tlds.join() + Date.now())
   return tlds.filter((t) => PURCHASABLE_TLDS.includes(t)).map((tld) => {
+    const v = verifyCandidate(rng, baseName, tld, task)
     const domain = baseName + tld
-    if (REGISTERED_TEST_NAMES.includes(baseName)) return { tld, domain, available: false, reason: 'רשום אצל הספק' }
-    const available = rng() > 0.5
-    if (!available) return { tld, domain, available: false, reason: 'אין תשובת זמינות חיובית' }
+    if (v.state !== 'AVAILABLE_VERIFIED') return { tld, domain, available: false, reason: v.state }
     const total = rint(rng, 8, task.maxTotalPrice + 60)
     return { tld, domain, available: total <= task.maxTotalPrice, total, currency: task.currency, reason: total > task.maxTotalPrice ? 'מעל התקציב' : undefined }
   })
 }
+
+// Server-side re-verification right before an order (correction §8). Never trusts the display.
+export interface ServerVerifyResult { ok: boolean; reason?: 'taken' | 'stale' | 'price-changed' | 'no-price'; newTotal?: number }
+export function serverVerify(opp: Opportunity): ServerVerifyResult {
+  if (new Date(opp.verification.validUntil ?? 0).getTime() <= Date.now()) return { ok: false, reason: 'stale' }
+  if (!opp.priceKnown || opp.price.total <= 0) return { ok: false, reason: 'no-price' }
+  const roll = Math.random()
+  if (roll > 0.9) return { ok: false, reason: 'taken' } // another user registered it after the check
+  if (roll > 0.8) return { ok: false, reason: 'price-changed', newTotal: opp.price.total + Math.round(opp.price.total * 0.15) }
+  return { ok: true }
+}
+
+// ── The adapter contract, isolated for regression testing (correction spec §4, §10) ──
+// A raw provider response. HTTP 200 / envelope OK are NOT sufficient on their own.
+export interface ProviderAvailabilityResponse {
+  httpStatus: number
+  envelopeStatus?: string
+  itemError?: boolean
+  available?: boolean | string // may arrive as the string "false"
+  environment: 'production' | 'sandbox'
+  domainEcho?: string
+  requestDomain: string
+  runId?: string
+  requestRunId?: string
+  rdap404?: boolean
+  recentRegistrationEvidence?: boolean
+}
+
+// Normalize a raw provider response into a hard verification state. Failure never becomes available.
+export function normalizeProviderResponse(r: ProviderAvailabilityResponse): VerificationState {
+  if (r.environment !== 'production') return 'ERROR' // sandbox/demo evidence is not valid in production
+  if (r.httpStatus !== 200) return r.httpStatus === 0 ? 'UNKNOWN' : 'ERROR' // timeout/429/500
+  if (r.itemError) return 'ERROR' // HTTP 200 with an item-level error
+  if (r.domainEcho !== undefined && r.domainEcho !== r.requestDomain) return 'CONFLICT' // wrong domain
+  if (r.runId !== undefined && r.requestRunId !== undefined && r.runId !== r.requestRunId) return 'ERROR' // old run
+  // treat the string "false" as false, not as a non-empty truthy string
+  const avail = typeof r.available === 'string' ? r.available.toLowerCase() === 'true' : r.available === true
+  if (r.available === undefined) return 'UNKNOWN' // missing field
+  if (avail) return r.recentRegistrationEvidence ? 'CONFLICT' : 'AVAILABLE_VERIFIED'
+  return 'REGISTERED'
+}
+
+export interface CanPurchaseInputs {
+  state: VerificationState
+  priceKnown: boolean
+  priceValid: boolean
+  tldSupported: boolean
+  fresh: boolean
+  environment: 'production' | 'sandbox'
+  eligibility: boolean
+  budgetOk: boolean
+}
+// can_purchase is derived server-side from evidence only (correction spec §4).
+export function deriveCanPurchase(i: CanPurchaseInputs): boolean {
+  if (i.state !== 'AVAILABLE_VERIFIED' && i.state !== 'FIXED_PRICE_VERIFIED') return false
+  return i.priceKnown && i.priceValid && i.tldSupported && i.fresh && i.environment === 'production' && i.eligibility && i.budgetOk
+}
+
+export { SCAN_SOURCES }
